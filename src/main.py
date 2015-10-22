@@ -15,9 +15,8 @@ if __name__ == '__main__':
     cv2.createTrackbar("dist", cv_window_name, 100, 1000, nothing)
     bridge = cv_bridge.CvBridge()
 
-    #baxter.start(False)
+    baxter.start(False)
 
-    #time.sleep(5)
     width = 1280
     height = 800
 
@@ -25,7 +24,9 @@ if __name__ == '__main__':
     pub2 = rospy.Publisher("/polygon/camera_left/rotation", PolygonStamped, queue_size=10)
     pub3 = rospy.Publisher("visualization_marker_array", MarkerArray, queue_size=10)
 
-    rospy.init_node('send_polygon')
+    print baxter._left_arm.get_joint_angle()
+    print baxter._left_arm.get_spatial_jacobian()
+    pass
 
     print "Image Getting"
     while True:
