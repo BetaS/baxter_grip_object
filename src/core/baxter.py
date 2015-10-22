@@ -54,7 +54,6 @@ class Baxter:
         parser.parse_args(rospy.myargv()[1:])
 
         self._name = "baxter_"+name
-
         self._head_image = None
 
     def start(self, first=False):
@@ -131,3 +130,9 @@ class Baxter:
     def display(self, img):
         self._display.publish(img)
 
+    def get_joint_angle(self):
+        # [s0, s1, ....]
+        pass
+
+    def get_end_effector_pos(self):
+        pass
