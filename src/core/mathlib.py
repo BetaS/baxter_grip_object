@@ -11,6 +11,131 @@ def var2(sum_of_square, sum, len):
 def var(data):
     return var2(sum_of_square(data), sum(data), len(data))*10
 
+def unit_vector(vec):
+    mag  = math.sqrt(vec[0]**2+vec[1]**2+vec[2]**2)
+    return [vec[0]/mag, vec[1]/mag, vec[2]/mag]
+
+def quat_to_rotation_matrix(X, Y, Z, W):
+    xx = X * X;
+    xy = X * Y;
+    xz = X * Z;
+    xw = X * W;
+
+    yy = Y * Y;
+    yz = Y * Z;
+    yw = Y * W;
+
+    zz = Z * Z;
+    zw = Z * W;
+
+    m00 = 1 - 2 * ( yy + zz );
+    m01 =     2 * ( xy - zw );
+    m02 =     2 * ( xz + yw );
+
+    m10 =     2 * ( xy + zw );
+    m11 = 1 - 2 * ( xx + zz );
+    m12 =     2 * ( yz - xw );
+
+    m20 =     2 * ( xz - yw );
+    m21 =     2 * ( yz + xw );
+    m22 = 1 - 2 * ( xx + yy );
+
+    return np.array([[m00, m01, m02], [m10, m11, m12], [m20, m21, m22]], dtype=np.float32)
+
+def eular_to_rotation_matrix(R, P, Y):
+    m00 = math.cos(R) * math.cos(P)
+    m01 = math.cos(R) * math.sin(P) * math.sin(Y) - math.sin(R) * math.cos(Y)
+    m02 = math.cos(R) * math.sin(P) * math.cos(Y) + math.sin(R) * math.sin(Y)
+
+    m10 = math.sin(R) * math.cos(P)
+    m11 = math.sin(R) * math.sin(P) * math.sin(Y) + math.cos(R) * math.cos(Y)
+    m12 = math.sin(R) * math.sin(P) * math.cos(Y) - math.cos(R) * math.sin(Y)
+
+    m20 = -math.sin(P)
+    m21 = math.cos(P)*math.sin(Y)
+    m22 = math.cos(P)*math.cos(Y)
+
+    return np.array([[m00, m01, m02], [m10, m11, m12], [m20, m21, m22]], dtype=np.float32)
+
+def eular_to_rotation_matrix2(R, P, Y):
+    RX = np.array([
+        [1,          0,           0, 0],
+        [0, math.cos(R), -math.sin(R), 0],
+        [0, math.sin(R),  math.cos(R), 0],
+        [0,          0,           0, 1]], dtype=np.float32)
+
+    RY = np.array([
+        [math.cos(P), 0, -math.sin(P), 0],
+        [        0, 1,          0, 0],
+        [math.sin(P), 0,  math.cos(P), 0],
+        [        0, 0,          0, 1]], dtype=np.float32)
+
+    RZ = np.array([
+        [math.cos(Y), -math.sin(Y), 0, 0],
+        [math.sin(Y),  math.cos(Y), 0, 0],
+        [0,            0,           1, 0],
+        [0,            0,           0, 1]], dtype=np.float32)
+
+    return np.dot(np.dot(RX,RY),RZ)
+
+def translate_matrix(x, y, z):
+    return np.array([
+        [1,         0,      0,      -x],
+        [0,         1,      0,      -y],
+        [0,         0,      1,      -z],
+        [0,         0,      0,      1]], dtype=np.float32)
+
+def eular_to_vector(R, P, Y):
+    x = math.cos(Y)*math.cos(P)
+    y = math.sin(Y)*math.cos(P)
+    z = math.sin(P)
+
+    return [x,y,z]
+
+def quat_to_rad(X, Y, Z, W):
+    rx = math.atan2((2*(X*Y+Z*W)), 1-2*(Y**2+Z**2))
+    ry = math.asin(2*(X*Z-W*Y))
+    rz = math.atan2((2*(X*W+Y*Z)), 1-2*(Z**2+W**2))
+
+    return [rx, ry, rz]
+"""
+def get_extrinsic_matrix(x, y, z, rx, ry, rz):
+    R = eular_to_rotation_matrix(rx, ry, rz)
+    R = np.transpose(R)
+    C = np.array([x, y, z], dtype=np.float32)
+    T = -np.dot(R, C)
+    return np.array(
+           [[R[0][0], R[0][1], R[0][2], T[0]],
+            [R[1][0], R[1][1], R[1][2], T[1]],
+            [R[2][0], R[2][1], R[2][2], T[2]]], dtype=np.float32)
+
+def get_extrinsic_matrix2(x, y, z, rx, ry, rz, rw):
+    R = quat_to_rotation_matrix(rx, ry, rz, rw)
+    R = np.transpose(R)
+    C = np.array([x, y, z], dtype=np.float32)
+    T = -np.dot(R, C)
+    return np.array(
+           [[R[0][0], R[0][1], R[0][2], T[0]],
+            [R[1][0], R[1][1], R[1][2], T[1]],
+            [R[2][0], R[2][1], R[2][2], T[2]]], dtype=np.float32)
+"""
+def rotation_matrix(axis, theta):
+    """
+    Return the rotation matrix associated with counterclockwise rotation about
+    the given axis by theta radians.
+    """
+    axis = np.asarray(axis)
+    theta = np.asarray(theta)
+    axis = axis/math.sqrt(np.dot(axis, axis))
+    a = math.cos(theta/2)
+    b, c, d = -axis*math.sin(theta/2)
+    aa, bb, cc, dd = a*a, b*b, c*c, d*d
+    bc, ad, ac, ab, bd, cd = b*c, a*d, a*c, a*b, b*d, c*d
+    return np.array([[aa+bb-cc-dd, 2*(bc+ad), 2*(bd-ac), 0],
+                     [2*(bc-ad), aa+cc-bb-dd, 2*(cd+ab), 0],
+                     [2*(bd+ac), 2*(cd-ab), aa+dd-bb-cc, 0],
+                     [0, 0, 0, 1]])
+
 def line_intersection(line1, line2):
     xdiff = (line1[0][0] - line1[1][0], line2[0][0] - line2[1][0])
     ydiff = (line1[0][1] - line1[1][1], line2[0][1] - line2[1][1]) #Typo was here
@@ -31,6 +156,13 @@ def dist(a, b):
     dx = a[0] - b[0]
     dy = a[1] - b[1]
     return math.sqrt((dx**2+dy**2))
+
+def center_point(a, b, c, d):
+    cx = (a[0]+b[0]+c[0]+d[0])/4
+    cy = (a[1]+b[1]+c[1]+d[1])/4
+    cz = (a[2]+b[2]+c[2]+d[2])/4
+
+    return [cx, cy, cz]
 
 def order_points(pts):
     # initialzie a list of coordinates that will be ordered

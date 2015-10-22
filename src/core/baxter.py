@@ -1,4 +1,4 @@
-from src.importer import rospy, baxter_interface, CHECK_VERSION
+from src.importer import rospy, mathlib, baxter_interface, CHECK_VERSION, ClassProperty
 
 from sensor_msgs.msg import (
     Image,
@@ -6,12 +6,47 @@ from sensor_msgs.msg import (
 
 import roslib, rosmsg
 
+import numpy as np
+
 import argparse
 
 LEFT = 0
 RIGHT = 1
 
 class Baxter:
+    class Camera:
+        distort_matrix = np.array(
+            [0.0203330914024, -0.0531389002992, 0.000622878864307, -0.00225405996481, 0.0137897514515],
+            np.float32)
+
+        intrinsic_matrix = np.array([
+            [405.792519532, 0.0,            666.049300318],
+            [0.0,           405.792519532,  397.038941784],
+            [0.0,           0.0,            1.0          ]], np.float32)
+
+        @ClassProperty
+        @classmethod
+        def extrinsic_matrix(cls):
+            pos = [0.79983, 1.0118, 0.28273]
+            rot = [-0.65328, 0.2706, -0.2706, 0.65328]
+
+            R = mathlib.quat_to_rotation_matrix(rot[0], rot[1], rot[2], rot[3])
+            R = np.transpose(R)
+            C = np.array([pos[0], pos[1], pos[2]], dtype=np.float32)
+            T = -np.dot(R, C)
+            return np.array(
+                   [[R[0][0], R[0][1], R[0][2], T[0]],
+                    [R[1][0], R[1][1], R[1][2], T[1]],
+                    [R[2][0], R[2][1], R[2][2], T[2]]], dtype=np.float32)
+
+        @classmethod
+        def camera_matrix(cls):
+            In = cls.intrinsic_matrix
+            Ex = cls.extrinsic_matrix
+
+            Cm = np.dot(In, Ex)
+            return Cm
+
     def __init__(self, name="pymodules"):
         arg_fmt = argparse.RawDescriptionHelpFormatter
         parser = argparse.ArgumentParser(formatter_class=arg_fmt,
@@ -45,22 +80,19 @@ class Baxter:
 
         camera_name = "left_hand_camera"
         if first:
-            self._head_camera = baxter_interface.CameraController(camera_name)
-            self._head_camera.resolution = (640, 400)
-            self._head_camera.fps = 30
-            self._head_camera.exposure = 100
-            self._head_camera.gain = 0
-            #self._head_camera.white_balance_red = 1500
-            #self._head_camera.white_balance_green = 1500
-            #self._head_camera.white_balance_blue = 1500
+            self._camera = baxter_interface.CameraController(camera_name)
+            self._camera.resolution = (640, 400)
+            self._camera.fps = 30
+            self._camera.exposure = 100
+            self._camera.gain = 0
 
             print("Open camera...")
-            self._head_camera.open()
+            self._camera.open()
 
-        self._head_image_rate = rospy.Rate(30)
+        self._rate = rospy.Rate(30)
 
         print("Initializing robot...")
-        self._head_camera_sub = rospy.Subscriber("/cameras/"+camera_name+"/image", Image, self.republish, None, 1)
+        self._camera_sub = rospy.Subscriber("/cameras/"+camera_name+"/image", Image, self.republish, None, 1)
         self._display = None#rospy.Publisher('/robot/xdisplay', Image, queue_size=10)
 
         self.init()
@@ -73,7 +105,7 @@ class Baxter:
         maintaining start state
         """
         print("\nExiting...")
-        self._head_camera_sub.unregister()
+        self._camera_sub.unregister()
 
         self.init()
 
@@ -87,16 +119,15 @@ class Baxter:
     def head_angle(self, angle=0.0):
         self._head.set_pan(angle)
 
-    def get_head_image(self, wait=True):
-        while wait and self._head_image == None:
-            self._head_image_rate.sleep()
+    def get_camera_image(self, type=0, wait=True):
+        while wait and self._camera_image == None:
+            self._rate.sleep()
 
-        return self._head_image
+        return self._camera_image
 
     def republish(self, msg):
-        self._head_image = msg
+        self._camera_image = msg
 
     def display(self, img):
-        print "displayed"
         self._display.publish(img)
 

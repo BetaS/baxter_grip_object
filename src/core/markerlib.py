@@ -9,6 +9,7 @@ MARKER_YELLOW   = (0, 255, 255)
 MARKER_WHITE    = (255, 255, 255)
 
 def MarkerDetection(hsv, edge):
+    # Find Contours from Edge
     (cnts, _) = cv2.findContours(edge.copy(), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
     cnts = sorted(cnts, key = lambda x: cv2.arcLength(x, True), reverse = True)
     squares = []
