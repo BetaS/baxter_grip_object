@@ -24,9 +24,9 @@ if __name__ == '__main__':
     pub2 = rospy.Publisher("/polygon/camera_left/rotation", PolygonStamped, queue_size=10)
     pub3 = rospy.Publisher("visualization_marker_array", MarkerArray, queue_size=10)
 
-    print baxter._left_arm.get_joint_angle()
-    print baxter._left_arm.get_spatial_jacobian()
-    pass
+    #print baxter._left_arm.get_joint_angle()
+    #print baxter._left_arm.get_spatial_jacobian()
+    #pass
 
     print "Image Getting"
     while True:
