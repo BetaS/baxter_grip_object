@@ -14,6 +14,92 @@ LEFT = 0
 RIGHT = 1
 
 class Baxter:
+    class Arm:
+        joint_num = 7
+        link_l = np.array([1, 1, 1, 1, 1, 1], dtype=np.float32)
+        omegas = np.transpose(np.array(
+            [[0,0,1],
+             [-1,0,0],
+             [0,1,0],
+             [-1,0,0],
+             [0,1,0],
+             [-1,0,0],
+             [0,1,0]], dtype=np.float32))
+
+        def __init__(self, name):
+            self._limb = baxter_interface.Limb(name)
+
+        def get_joint_angle(self):
+            angles = self._limb.joint_angles()
+            #return np.array([angles["left_s0"], angles["left_s1"], angles["left_e0"], angles["left_e1"], angles["left_w0"], angles["left_w1"], angles["left_w2"]], dtype=np.float32)
+            return np.array([0, 0, 0, 0, 0, 0, 0], dtype=np.float32)
+
+        def get_arm_position(self):
+            P = np.zeros((6, 3))
+            P[0] = [0,0,self.link_l[0]]
+            P[1] = [0,self.link_l[1],self.link_l[0]]
+            P[2] = [0,self.link_l[2]+self.link_l[1],self.link_l[0]]
+            P[3] = [0,self.link_l[3]+self.link_l[2]+self.link_l[1],self.link_l[0]]
+            P[4] = [0,self.link_l[4]+self.link_l[3]+self.link_l[2]+self.link_l[1],self.link_l[0]]
+            P[5] = [0,self.link_l[5]+self.link_l[4]+self.link_l[3]+self.link_l[2]+self.link_l[1],self.link_l[0]]
+            return np.transpose(P)
+
+        def adjoint_transform(self, i, theta):
+            pass
+
+        def get_twist(self, P, w):
+            xi = np.zeros((7, 6))
+
+            for i in range(1, self.joint_num):
+                xi[i] = np.concatenate((-1*np.cross(w[:,i], P[:,i-1]), w[:,i]), axis=0)
+
+            xi[0] = np.concatenate((-1*np.cross(w[:,0],P[:,0]), w[:,0]), axis=0)
+
+            return np.transpose(xi)
+
+        def get_xi_prime(self, xi):
+            xi_prime = np.zeros((6, 7))
+
+            for i in range(self.joint_num):
+                for j in range(i):
+                    if i == 1:
+                        xi_prime[:,i-1] = xi[:,i-1];
+                    else:
+                        xi_prime[:,i-1] = np.dot(self.adjoint_transform(i, self.get_joint_angle()), xi[:,i-1]);
+
+            return xi_prime
+
+        def get_spatial_jacobian(self):
+            # Position of each joint : (3x6)-matrix
+            # For Forward Kinematics, we need to form Jacobian for Baxter's arm.
+            # J is Spatial Jacobian, which is a (6x7)-matrix.
+            # Spatial Jacobian is for the world frame( universal coordinate).
+            # 6 is for (x,y,z,roll,pitch,yaw) (-> if we use Quaternion, then is it 7??)
+            # joint_num(Number of Joints in Baxter's arm) is 7.
+            # link_l 6x1 vector of link lengths
+            # theta 7x1 vector of angles
+
+            P = self.get_arm_position()
+
+            # Omegas : (3x7)-matrix
+            w = self.omegas
+
+            # Twist : (6x7)-matrix
+            xi = self.get_twist(P, w)
+
+            # For making Jacobian, we need xi_prime : (6x7)-matrix
+            xi_prime = self.get_xi_prime(xi)
+
+            # J : (6x7)-matrix
+            J = np.zeros((6, 7))
+            for k in range(self.joint_num):
+                 J[:,k-1] = xi_prime[:,k-1]
+
+            return J
+
+        def get_end_effector_pos(self):
+            return np.dot(self.get_spatial_jacobian(), self.get_joint_angle())
+
     class Camera:
         distort_matrix = np.array(
             [0.0203330914024, -0.0531389002992, 0.000622878864307, -0.00225405996481, 0.0137897514515],
@@ -91,8 +177,9 @@ class Baxter:
         self._rate = rospy.Rate(30)
 
         print("Initializing robot...")
-        self._camera_sub = rospy.Subscriber("/cameras/"+camera_name+"/image", Image, self.republish, None, 1)
+        self._camera_sub = rospy.Subscriber("/cameras/"+camera_name+"/image", Image, self.republish_camera, None, 1)
         self._display = None#rospy.Publisher('/robot/xdisplay', Image, queue_size=10)
+        self._left_arm = Baxter.Arm("left")
 
         self.init()
 
@@ -124,15 +211,9 @@ class Baxter:
 
         return self._camera_image
 
-    def republish(self, msg):
+    def republish_camera(self, msg):
         self._camera_image = msg
+
 
     def display(self, img):
         self._display.publish(img)
-
-    def get_joint_angle(self):
-        # [s0, s1, ....]
-        pass
-
-    def get_end_effector_pos(self):
-        pass
