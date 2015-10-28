@@ -8,6 +8,12 @@ class ClassProperty(property):
     def __get__(self, cls, owner):
         return self.fget.__get__(None, owner)()
 
+class Defines:
+    LEFT = "left"
+    RIGHT = "right"
+    ARMS = [LEFT, RIGHT]
+    ARMS_IDX = {LEFT: 0, RIGHT: 10}
+
 from baxter_interface import CHECK_VERSION
 
 import src.core.mathlib as mathlib

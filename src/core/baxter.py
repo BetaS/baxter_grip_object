@@ -1,4 +1,4 @@
-from src.importer import rospy, mathlib, baxter_interface, CHECK_VERSION, ClassProperty
+from src.importer import rospy, mathlib, baxter_interface, CHECK_VERSION, Defines
 
 from sensor_msgs.msg import (
     Image,
@@ -9,9 +9,6 @@ import roslib, rosmsg
 import numpy as np
 
 import argparse
-
-LEFT = 0
-RIGHT = 1
 
 class Baxter:
     class Arm:
@@ -98,40 +95,85 @@ class Baxter:
             return J
 
         def get_end_effector_pos(self):
-            return np.dot(self.get_spatial_jacobian(), self.get_joint_angle())
+            pose = self._limb.endpoint_pose()
+            #print pose
+            pos = pose["position"]
+            rot = pose["orientation"]
+            return [pos.x, pos.y, pos.z], [rot.x, rot.y, rot.z, rot.w]
+            #return np.dot(self.get_spatial_jacobian(), self.get_joint_angle())
+
+        def get_camera_pos(self):
+            pos, rot = self.get_end_effector_pos()
+            q = mathlib.Quaternion(rot[0], rot[1], rot[2], rot[3])
+            pos = pos+q.distance(0.03825, 0.012, 0.015355)
+            rot = q*mathlib.Quaternion(0.000, 0.000, -0.707, 0.707)
+            rot = rot.decompose()
+            return pos, rot
 
     class Camera:
         distort_matrix = np.array(
             [0.0203330914024, -0.0531389002992, 0.000622878864307, -0.00225405996481, 0.0137897514515],
             np.float32)
 
+        focal_length = 405.792519532
+        frame_width = 666.049300318
+        frame_height = 397.038941784
+
         intrinsic_matrix = np.array([
-            [405.792519532, 0.0,            666.049300318],
-            [0.0,           405.792519532,  397.038941784],
+            [focal_length,  0.0,            frame_width],
+            [0.0,           focal_length,   frame_height],
             [0.0,           0.0,            1.0          ]], np.float32)
 
-        @ClassProperty
         @classmethod
-        def extrinsic_matrix(cls):
-            pos = [0.79983, 1.0118, 0.28273]
-            rot = [-0.65328, 0.2706, -0.2706, 0.65328]
-
-            R = mathlib.quat_to_rotation_matrix(rot[0], rot[1], rot[2], rot[3])
+        def extrinsic_matrix(cls, pos, rot):
+            R = mathlib.Quaternion(rot[0], rot[1], rot[2], rot[3]).to_rotation_matrix()
             R = np.transpose(R)
-            C = np.array([pos[0], pos[1], pos[2]], dtype=np.float32)
-            T = -np.dot(R, C)
+            T = np.array([-pos[0], -pos[1], -pos[2]], dtype=np.float32)
+            T = np.dot(R, T)
             return np.array(
                    [[R[0][0], R[0][1], R[0][2], T[0]],
                     [R[1][0], R[1][1], R[1][2], T[1]],
                     [R[2][0], R[2][1], R[2][2], T[2]]], dtype=np.float32)
 
         @classmethod
-        def camera_matrix(cls):
+        def camera_matrix(cls, pos, rot):
             In = cls.intrinsic_matrix
-            Ex = cls.extrinsic_matrix
+            Ex = cls.extrinsic_matrix(pos, rot)
 
             Cm = np.dot(In, Ex)
             return Cm
+
+        @classmethod
+        def inv_camera_matrix(cls, pos, rot):
+            In = np.linalg.inv(cls.intrinsic_matrix)
+            Ex = np.linalg.pinv(cls.extrinsic_matrix(pos, rot))
+
+            Cmi = np.dot(Ex, In)
+            return Cmi
+
+        @classmethod
+        def find_boundary(cls, pos, rot):
+            Cm = np.linalg.inv(cls.intrinsic_matrix)
+            qrot = mathlib.Quaternion.from_xyzw(rot)
+            width = 1280
+            height = 800
+
+            image_boundary = [np.array([0, 0, 1]), np.array([width-1, 0, 1]), np.array([width-1, height-1, 1]), np.array([0, height-1, 1])]
+
+            boundary = []
+            for p in image_boundary:
+                p =  np.dot(Cm, p)
+                p = qrot.distance(p[0], p[1], p[2])
+                p += pos
+                boundary.append(p)
+
+
+            center = np.dot(Cm, np.array([cls.frame_width, cls.frame_height, 1], dtype=np.float32))
+            center = qrot.distance(center[0], center[1], center[2])
+            center += pos
+
+            return center, boundary
+
 
     def __init__(self, name="pymodules"):
         arg_fmt = argparse.RawDescriptionHelpFormatter
@@ -155,31 +197,36 @@ class Baxter:
         print("Getting robot state... ")
         self._rs = baxter_interface.RobotEnable(CHECK_VERSION)
         self._init_state = self._rs.state().enabled
+        self._rate = rospy.Rate(30)
+
         print("Enabling robot... ")
         self._rs.enable()
 
         print("Initializing camera...")
+        camera_mapper = ["left_hand_camera", "right_hand_camera"]
+        self._camera = {}
 
-        #self._left_camera = baxter_interface.CameraController("left_hand_camera")
-        #self._left_camera.close()
+        for idx in Defines.ARMS:
+            camera_name = idx+"_hand_camera"
+            camera = None
+            if first:
+                camera = baxter_interface.CameraController(camera_name)
+                camera.resolution = (640, 400)
+                camera.fps = 30
+                camera.exposure = 100
+                camera.gain = 0
 
-        camera_name = "left_hand_camera"
-        if first:
-            self._camera = baxter_interface.CameraController(camera_name)
-            self._camera.resolution = (640, 400)
-            self._camera.fps = 30
-            self._camera.exposure = 100
-            self._camera.gain = 0
+                print("Open camera...")
+                camera.open()
 
-            print("Open camera...")
-            self._camera.open()
-
-        self._rate = rospy.Rate(30)
+            sub = rospy.Subscriber("/cameras/"+camera_name+"/image", Image, lambda x: self.republish_camera(idx, x), None, 1)
+            self._camera[idx] = {"name": camera_name, "camera": camera, "sub": sub, "image": None}
 
         print("Initializing robot...")
-        self._camera_sub = rospy.Subscriber("/cameras/"+camera_name+"/image", Image, self.republish_camera, None, 1)
-        self._display = None#rospy.Publisher('/robot/xdisplay', Image, queue_size=10)
-        self._left_arm = Baxter.Arm("left")
+        self._display = rospy.Publisher('/robot/xdisplay', Image, queue_size=10)
+        self._arms = {}
+        self._arms[Defines.LEFT] = Baxter.Arm("left")
+        self._arms[Defines.RIGHT] = Baxter.Arm("right")
 
         self.init()
 
@@ -191,7 +238,8 @@ class Baxter:
         maintaining start state
         """
         print("\nExiting...")
-        self._camera_sub.unregister()
+        for idx in self._camera:
+            self._camera[idx]["sub"].unregister()
 
         self.init()
 
@@ -211,9 +259,8 @@ class Baxter:
 
         return self._camera_image
 
-    def republish_camera(self, msg):
-        self._camera_image = msg
-
+    def republish_camera(self, idx, msg):
+        self._camera[idx]["image"] = msg
 
     def display(self, img):
         self._display.publish(img)

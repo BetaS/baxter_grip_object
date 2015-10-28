@@ -2,6 +2,85 @@ import math as math
 import numpy as np
 import cv2
 
+class Quaternion:
+    def __init__(self, x, y, z, w):
+        self._x = x
+        self._y = y
+        self._z = z
+        self._w = w
+
+    @classmethod
+    def from_xyzw(cls, l):
+        return Quaternion(l[0], l[1], l[2], l[3])
+
+    @classmethod
+    def from_wxyz(cls, l):
+        return Quaternion(l[1], l[2], l[3], l[0])
+
+    def __str__(self):
+        return "w = "+str(self._w)+", x = "+str(self._x)+", y = "+str(self._y)+", z = "+str(self._z)
+
+    def __mul__(self, q):
+        w1, x1, y1, z1 = (self._w, self._x, self._y, self._z)
+        w2, x2, y2, z2 = (q._w, q._x, q._y, q._z)
+        w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
+        x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
+        y = w1 * y2 + y1 * w2 + z1 * x2 - x1 * z2
+        z = w1 * z2 + z1 * w2 + x1 * y2 - y1 * x2
+
+        return Quaternion(x, y, z, w)
+
+    def to_euler(self):
+        rx = math.atan2((2*(self._x*self._w+self._y*self._z)), 1-2*(self._x**2+self._y**2))
+        ry = math.asin(2*(self._w*self._y-self._x*self._z))
+        rz = math.atan2((2*(self._x*self._y+self._z*self._w)), 1-2*(self._y**2+self._z**2))
+
+        return [rx, ry, rz]
+
+    def to_euler_degree(self):
+        r = self.to_euler()
+
+        return [math.degrees(r[0]), math.degrees(r[1]), math.degrees(r[2])]
+
+    def to_rotation_matrix(self, size=3):
+        ret = np.identity(size, dtype=np.float32)
+
+        xx = self._x * self._x
+        xy = self._x * self._y
+        xz = self._x * self._z
+        xw = self._x * self._w
+
+        yy = self._y * self._y
+        yz = self._y * self._z
+        yw = self._y * self._w
+
+        zz = self._z * self._z
+        zw = self._z * self._w
+
+        m00 = 1 - 2 * ( yy + zz )
+        m01 =     2 * ( xy - zw )
+        m02 =     2 * ( xz + yw )
+
+        m10 =     2 * ( xy + zw )
+        m11 = 1 - 2 * ( xx + zz )
+        m12 =     2 * ( yz - xw )
+
+        m20 =     2 * ( xz - yw )
+        m21 =     2 * ( yz + xw )
+        m22 = 1 - 2 * ( xx + yy )
+
+        ret[:3, :3] = np.array([[m00, m01, m02], [m10, m11, m12], [m20, m21, m22]], dtype=np.float32)
+
+        return ret
+
+    def distance(self, dist_x, dist_y, dist_z):
+        rot = self.to_rotation_matrix()
+        #rot = np.transpose(rot)
+        return np.dot(rot, np.array([dist_x, dist_y, dist_z], dtype=np.float32))
+
+    def decompose(self):
+        return [self._x, self._y, self._z, self._w]
+
 def sum_of_square(data):
     return sum(map(lambda x: x**2, data))
 
@@ -14,33 +93,6 @@ def var(data):
 def unit_vector(vec):
     mag  = math.sqrt(vec[0]**2+vec[1]**2+vec[2]**2)
     return [vec[0]/mag, vec[1]/mag, vec[2]/mag]
-
-def quat_to_rotation_matrix(X, Y, Z, W):
-    xx = X * X;
-    xy = X * Y;
-    xz = X * Z;
-    xw = X * W;
-
-    yy = Y * Y;
-    yz = Y * Z;
-    yw = Y * W;
-
-    zz = Z * Z;
-    zw = Z * W;
-
-    m00 = 1 - 2 * ( yy + zz );
-    m01 =     2 * ( xy - zw );
-    m02 =     2 * ( xz + yw );
-
-    m10 =     2 * ( xy + zw );
-    m11 = 1 - 2 * ( xx + zz );
-    m12 =     2 * ( yz - xw );
-
-    m20 =     2 * ( xz - yw );
-    m21 =     2 * ( yz + xw );
-    m22 = 1 - 2 * ( xx + yy );
-
-    return np.array([[m00, m01, m02], [m10, m11, m12], [m20, m21, m22]], dtype=np.float32)
 
 def eular_to_rotation_matrix(R, P, Y):
     m00 = math.cos(R) * math.cos(P)
@@ -92,33 +144,9 @@ def eular_to_vector(R, P, Y):
 
     return [x,y,z]
 
-def quat_to_rad(X, Y, Z, W):
-    rx = math.atan2((2*(X*Y+Z*W)), 1-2*(Y**2+Z**2))
-    ry = math.asin(2*(X*Z-W*Y))
-    rz = math.atan2((2*(X*W+Y*Z)), 1-2*(Z**2+W**2))
+def move_distance(x, y, z, rx, ry, rz, dist):
+    pass
 
-    return [rx, ry, rz]
-"""
-def get_extrinsic_matrix(x, y, z, rx, ry, rz):
-    R = eular_to_rotation_matrix(rx, ry, rz)
-    R = np.transpose(R)
-    C = np.array([x, y, z], dtype=np.float32)
-    T = -np.dot(R, C)
-    return np.array(
-           [[R[0][0], R[0][1], R[0][2], T[0]],
-            [R[1][0], R[1][1], R[1][2], T[1]],
-            [R[2][0], R[2][1], R[2][2], T[2]]], dtype=np.float32)
-
-def get_extrinsic_matrix2(x, y, z, rx, ry, rz, rw):
-    R = quat_to_rotation_matrix(rx, ry, rz, rw)
-    R = np.transpose(R)
-    C = np.array([x, y, z], dtype=np.float32)
-    T = -np.dot(R, C)
-    return np.array(
-           [[R[0][0], R[0][1], R[0][2], T[0]],
-            [R[1][0], R[1][1], R[1][2], T[1]],
-            [R[2][0], R[2][1], R[2][2], T[2]]], dtype=np.float32)
-"""
 def rotation_matrix(axis, theta):
     """
     Return the rotation matrix associated with counterclockwise rotation about
@@ -157,7 +185,10 @@ def dist(a, b):
     dy = a[1] - b[1]
     return math.sqrt((dx**2+dy**2))
 
-def center_point(a, b, c, d):
+def center_point(l):
+    return center_point2(l[0], l[1], l[2], l[3])
+
+def center_point2(a, b, c, d):
     cx = (a[0]+b[0]+c[0]+d[0])/4
     cy = (a[1]+b[1]+c[1]+d[1])/4
     cz = (a[2]+b[2]+c[2]+d[2])/4

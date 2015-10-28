@@ -2,7 +2,7 @@
 
 import time
 from src.importer import *
-from geometry_msgs.msg import PolygonStamped, Point32
+from geometry_msgs.msg import PolygonStamped
 from visualization_msgs.msg import MarkerArray
 
 def nothing(x):
@@ -20,105 +20,29 @@ if __name__ == '__main__':
     width = 1280
     height = 800
 
-    pub1 = rospy.Publisher("/polygon/camera_left", PolygonStamped, queue_size=10)
-    pub2 = rospy.Publisher("/polygon/camera_left/rotation", PolygonStamped, queue_size=10)
-    pub3 = rospy.Publisher("visualization_marker_array", MarkerArray, queue_size=10)
+    arm_poly = {}
+    arm_poly[Defines.LEFT] = rospy.Publisher("/polygon/camera_left", PolygonStamped, queue_size=10)
+    arm_poly[Defines.RIGHT] = rospy.Publisher("/polygon/camera_right", PolygonStamped, queue_size=10)
 
-    print baxter._left_arm.get_joint_angle()
-    print baxter._left_arm.get_spatial_jacobian()
-    pass
+    marker_pub = rospy.Publisher("visualization_marker_array", MarkerArray, queue_size=10)
+    markers = MarkerArray()
 
     print "Image Getting"
     while True:
         dist = cv2.getTrackbarPos("dist", cv_window_name)
-    #    img = baxter.get_camera_image()
-    #    mat = bridge.imgmsg_to_cv2(img, "bgr8")
-        mat = cv2.imread("sample.png")
-
-        # Otsu Threshold Method
-        sub = cv2.cvtColor(mat, cv2.COLOR_BGR2YUV)
-        hsv = cv2.cvtColor(mat, cv2.COLOR_BGR2HSV)
 
         # Find Camera Matrix
-        pos = [0.79983, 1.0118, 0.28273]
-        Cm = Baxter.Camera.camera_matrix()
-        Cmi = np.linalg.pinv(Cm)
+        for arm in Defines.ARMS:
+            pos, rot = baxter._arms[arm].get_camera_pos()
+            center, bound = Baxter.Camera.find_boundary(pos, rot)
 
-        # Find Real World Image Surface
-        image_boundary = [np.array([0, 0, 1]), np.array([width-1, 0, 1]), np.array([width-1, height-1, 1]), np.array([0, height-1, 1])]
-        world_boundary = []
-        for p in image_boundary:
-            p =  np.dot(Cmi, p)
-            world_boundary.append(p)
+            p = rvizlib.create_polygon_list(bound)
+            arm_poly[arm].publish(p)
 
-        # Find Center Position of Image Plane
-        cp = mathlib.center_point(world_boundary[0], world_boundary[1], world_boundary[2], world_boundary[3])
+            marker = rvizlib.create_arrow(arm, 1, pos, center, [0, 1, 0])
+            markers.markers.append(marker)
 
-        # Rotation for Arbitary Axis
-        # 1. Translate to Origin
-        Tr = mathlib.translate_matrix(-cp[0], -cp[1], -cp[2])
-        Tri = mathlib.translate_matrix(cp[0], cp[1], cp[2])
-
-        # 2. Get Axis for Rotation
-        mid1 = (world_boundary[0]+world_boundary[3])/2
-        mid2 = (world_boundary[1]+world_boundary[2])/2
-        axis = (mid2-mid1)[:3]
-
-        # 3. Get Distance Angle
-        normal = mathlib.unit_vector(np.cross((world_boundary[2]-world_boundary[0])[:3], (world_boundary[3]-world_boundary[1])[:3]))
-        angle = np.dot(normal, np.array([0, 0, 1], dtype=np.float32))
-
-        # 4. Get Transformation Matrix
-        Rr = mathlib.rotation_matrix(axis, -angle+mathlib.math.radians(90))
-        Tr = np.dot(np.dot(Tr, Rr), Tri)
-
-        # 5. Display in RViz
-
-        ### Origin Image Plane
-        p = PolygonStamped()
-        p.header.frame_id = "base"
-        p.header.stamp = rospy.Time.now()
-
-        for b in world_boundary:
-            point = Point32()
-            point.x = b[0]+pos[0]
-            point.y = b[1]+pos[1]
-            point.z = b[2]+pos[2]
-            p.polygon.points.append( point )
-
-        pub1.publish(p)
-
-        ### Normal Image Plane
-        p = PolygonStamped()
-        p.header.frame_id = "base"
-        p.header.stamp = rospy.Time.now()
-
-        for b in world_boundary:
-            pt = np.array([b[0], b[1], b[2], 1], dtype=np.float32)
-            b = np.dot(Tr, pt)[:3]
-
-            point = Point32()
-            point.x = b[0]+pos[0]
-            point.y = b[1]+pos[1]
-            point.z = b[2]+pos[2]
-
-            p.polygon.points.append( point )
-
-        pub2.publish(p)
-
-        ### Normal Vectors each Plane
-        markers = MarkerArray()
-
-        start = [cp[0]+pos[0], cp[1]+pos[1], cp[2]+pos[2]]
-        end = [cp[0]+pos[0]+normal[0], cp[1]+pos[1]+normal[1], cp[2]+pos[2]+normal[2]]
-        marker = rvizlib.create_arrow(0, start, end, [0, 1, 0])
-        markers.markers.append(marker)
-
-        end = [cp[0]+pos[0], cp[1]+pos[1], cp[2]+pos[2]+1]
-        marker = rvizlib.create_arrow(1, start, end, [1, 0, 0])
-        markers.markers.append(marker)
-
-        pub3.publish(markers)
+        marker_pub.publish(markers)
 
         """
         # Projection 2D -> 3D matrix
