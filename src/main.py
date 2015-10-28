@@ -27,6 +27,10 @@ if __name__ == '__main__':
     marker_pub = rospy.Publisher("visualization_marker_array", MarkerArray, queue_size=10)
     markers = MarkerArray()
 
+    print baxter._arms[Defines.LEFT].get_joint_angle()
+    print baxter._arms[Defines.LEFT].get_spatial_jacobian()
+    pass
+
     print "Image Getting"
     while True:
         dist = cv2.getTrackbarPos("dist", cv_window_name)

@@ -41,8 +41,63 @@ class Baxter:
             P[5] = [0,self.link_l[5]+self.link_l[4]+self.link_l[3]+self.link_l[2]+self.link_l[1],self.link_l[0]]
             return np.transpose(P)
 
-        def adjoint_transform(self, i, theta):
-            pass
+        def rotation(self, w, theta):
+            # Rotations : Rodrigues formula
+            e_w_theta = []
+            for k in range(self.joint_num):
+                e_w_theta[k] = np.identity(3, dtype=np.float32) + self.skew(w[:,k])*mathlib.math.sin(theta[k])+(self.skew(w[:,k])**2)*(1-mathlib.math.cos(theta[k]))
+
+            return e_w_theta
+
+        def exponential_mapping(self, theta):
+            # Position vector p(theta) : Exponential mapping
+            P = self.get_arm_position()
+            w = self.omegas
+            e_w_theta = self.rotation(w, theta)
+
+            q = np.zeros((3,7), dtype=np.float32)
+            v1 = -np.cross(w[:,0],P[:,0])
+            q[:,0] = np.dot((np.identity(3, dtype=np.float32) - e_w_theta[0]), np.cross(w[:,0],v1))+np.dot(np.dot(np.dot(w[:,0],np.transpose(w[:,0])),v1),theta[0])
+
+            for j in range(1, self.joint_num):
+                v = -np.cross(w[:,j], P[:,j-1])
+                q[:,j] = np.dot((np.identity(3, dtype=np.float32)-e_w_theta[:,:,j]),np.cross(w[:,j],v))+np.dot(np.dot(np.dot(w[:,j],np.transpose(w[:,j])),v),theta[j])
+
+            e_xi_theta = []
+            for a in range(self.joint_num):
+                e_xi_theta[a] = np.identity((4), dtype=np.float32)
+                e_xi_theta[a][:2,:2] = e_w_theta[a]
+                e_xi_theta[a][3,:2] = q[:,a]
+
+            return e_xi_theta
+
+        def adjoint_transform(self, theta):
+            # joint_num is not necessarily 7
+            # It is not affected by link_l ?
+            # Rotation Matrix
+            e_xi_theta = self.exponential_mapping(theta);
+
+            # products of e_xi_theta : (4x4)-matrix
+            R =np.identity(4, dtype=np.float32)
+            for i in range(self.joint_num-1):
+                R = e_xi_theta[:,:,i] * R
+
+
+            #Adjoint Transformation "Ad" : (6x6)-matrix
+
+            Ad = np.identity(6, dtype=np.float32)
+            Ad[0:2,0:2] = R[0:2,0:2]
+            Ad[3:5,0:2] = np.zeros((3,3), dtype=np.float32)
+            skew_R = self.skew(R[0:2, 4])
+            Ad[0:2,3:5] = np.dot(skew_R, R[0:2, 0:2])
+            Ad[3:5,3:5] = R[0:2,0:2]
+            return Ad
+
+        def skew(self, vec):
+            # gives the skew symmetric matrix
+            return  np.array([[0, -vec[2], vec[1]],
+                              [vec[2], 0, -vec[0]],
+                              [-vec[1], vec[0], 0]], dtype=np.float32)
 
         def get_twist(self, P, w):
             xi = np.zeros((7, 6))
@@ -62,7 +117,7 @@ class Baxter:
                     if i == 1:
                         xi_prime[:,i-1] = xi[:,i-1];
                     else:
-                        xi_prime[:,i-1] = np.dot(self.adjoint_transform(i, self.get_joint_angle()), xi[:,i-1]);
+                        xi_prime[:,i-1] = np.dot(self.adjoint_transform(self.get_joint_angle()), xi[:,i-1]);
 
             return xi_prime
 
