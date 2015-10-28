@@ -26,13 +26,19 @@ if __name__ == '__main__':
 
     marker_pub = rospy.Publisher("visualization_marker_array", MarkerArray, queue_size=10)
     markers = MarkerArray()
-
+    """
     print baxter._arms[Defines.LEFT].get_joint_angle()
+    print
     print baxter._arms[Defines.LEFT].get_spatial_jacobian()
+    print
+    """
+    print "limb: ", baxter._arms[Defines.LEFT].get_end_effector_pos()
+    print "jacob: ", baxter._arms[Defines.LEFT].get_end_effector_pos2()
+
     pass
 
     print "Image Getting"
-    while True:
+    while False:
         dist = cv2.getTrackbarPos("dist", cv_window_name)
 
         # Find Camera Matrix

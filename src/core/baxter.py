@@ -13,7 +13,7 @@ import argparse
 class Baxter:
     class Arm:
         joint_num = 7
-        link_l = np.array([1, 1, 1, 1, 1, 1], dtype=np.float32)
+        link_l = np.array([0.2790163480873477, 0.102, 0.2713397434951246, 0.10359, 0.2908719477708361, 0.11597], dtype=np.float32)
         omegas = np.transpose(np.array(
             [[0,0,1],
              [-1,0,0],
@@ -28,8 +28,8 @@ class Baxter:
 
         def get_joint_angle(self):
             angles = self._limb.joint_angles()
-            #return np.array([angles["left_s0"], angles["left_s1"], angles["left_e0"], angles["left_e1"], angles["left_w0"], angles["left_w1"], angles["left_w2"]], dtype=np.float32)
-            return np.array([0, 0, 0, 0, 0, 0, 0], dtype=np.float32)
+            return np.array([angles["left_s0"], angles["left_s1"], angles["left_e0"], angles["left_e1"], angles["left_w0"], angles["left_w1"], angles["left_w2"]], dtype=np.float32)
+            #return np.array([0, 0, 0, 0, 0, 0, 0], dtype=np.float32)
 
         def get_arm_position(self):
             P = np.zeros((6, 3))
@@ -45,7 +45,9 @@ class Baxter:
             # Rotations : Rodrigues formula
             e_w_theta = []
             for k in range(self.joint_num):
-                e_w_theta[k] = np.identity(3, dtype=np.float32) + self.skew(w[:,k])*mathlib.math.sin(theta[k])+(self.skew(w[:,k])**2)*(1-mathlib.math.cos(theta[k]))
+                e_w_theta.append(np.identity(3, dtype=np.float32))
+                e_w_theta[k] += self.skew(w[:,k])*mathlib.math.sin(theta[k])
+                e_w_theta[k] += (self.skew(w[:,k])**2)*(1-mathlib.math.cos(theta[k]))
 
             return e_w_theta
 
@@ -61,13 +63,13 @@ class Baxter:
 
             for j in range(1, self.joint_num):
                 v = -np.cross(w[:,j], P[:,j-1])
-                q[:,j] = np.dot((np.identity(3, dtype=np.float32)-e_w_theta[:,:,j]),np.cross(w[:,j],v))+np.dot(np.dot(np.dot(w[:,j],np.transpose(w[:,j])),v),theta[j])
+                q[:,j] = np.dot((np.identity(3, dtype=np.float32)-e_w_theta[j]),np.cross(w[:,j],v))+np.dot(np.dot(np.dot(w[:,j],np.transpose(w[:,j])),v),theta[j])
 
             e_xi_theta = []
             for a in range(self.joint_num):
-                e_xi_theta[a] = np.identity((4), dtype=np.float32)
-                e_xi_theta[a][:2,:2] = e_w_theta[a]
-                e_xi_theta[a][3,:2] = q[:,a]
+                e_xi_theta.append(np.identity((4), dtype=np.float32))
+                e_xi_theta[a][:3,:3] = e_w_theta[a]
+                e_xi_theta[a][3,:3] = q[:,a]
 
             return e_xi_theta
 
@@ -80,17 +82,17 @@ class Baxter:
             # products of e_xi_theta : (4x4)-matrix
             R =np.identity(4, dtype=np.float32)
             for i in range(self.joint_num-1):
-                R = e_xi_theta[:,:,i] * R
+                R = e_xi_theta[i] * R
 
 
             #Adjoint Transformation "Ad" : (6x6)-matrix
 
             Ad = np.identity(6, dtype=np.float32)
-            Ad[0:2,0:2] = R[0:2,0:2]
-            Ad[3:5,0:2] = np.zeros((3,3), dtype=np.float32)
-            skew_R = self.skew(R[0:2, 4])
-            Ad[0:2,3:5] = np.dot(skew_R, R[0:2, 0:2])
-            Ad[3:5,3:5] = R[0:2,0:2]
+            Ad[0:3,0:3] = R[:3,:3]
+            Ad[3:6,0:3] = np.zeros((3,3), dtype=np.float32)
+            skew_R = self.skew(R[:3, 3])
+            Ad[0:3,3:6] = np.dot(skew_R, R[:3, :3])
+            Ad[3:6,3:6] = R[:3,:3]
             return Ad
 
         def skew(self, vec):
@@ -102,10 +104,9 @@ class Baxter:
         def get_twist(self, P, w):
             xi = np.zeros((7, 6))
 
+            xi[0] = np.concatenate((-1*np.cross(w[:,0],P[:,0]), w[:,0]), axis=0)
             for i in range(1, self.joint_num):
                 xi[i] = np.concatenate((-1*np.cross(w[:,i], P[:,i-1]), w[:,i]), axis=0)
-
-            xi[0] = np.concatenate((-1*np.cross(w[:,0],P[:,0]), w[:,0]), axis=0)
 
             return np.transpose(xi)
 
@@ -115,9 +116,9 @@ class Baxter:
             for i in range(self.joint_num):
                 for j in range(i):
                     if i == 1:
-                        xi_prime[:,i-1] = xi[:,i-1];
+                        xi_prime[:,i-1] = xi[:,i-1]
                     else:
-                        xi_prime[:,i-1] = np.dot(self.adjoint_transform(self.get_joint_angle()), xi[:,i-1]);
+                        xi_prime[:,i-1] = np.dot(self.adjoint_transform(self.get_joint_angle()), xi[:,i-1])
 
             return xi_prime
 
@@ -145,17 +146,19 @@ class Baxter:
             # J : (6x7)-matrix
             J = np.zeros((6, 7))
             for k in range(self.joint_num):
-                 J[:,k-1] = xi_prime[:,k-1]
+                 J[:,k] = xi_prime[:,k]
 
             return J
 
         def get_end_effector_pos(self):
             pose = self._limb.endpoint_pose()
-            #print pose
             pos = pose["position"]
             rot = pose["orientation"]
             return [pos.x, pos.y, pos.z], [rot.x, rot.y, rot.z, rot.w]
-            #return np.dot(self.get_spatial_jacobian(), self.get_joint_angle())
+
+        def get_end_effector_pos2(self):
+            pose = np.dot(self.get_spatial_jacobian(), self.get_joint_angle())
+            return pose[:3], pose[3:6]
 
         def get_camera_pos(self):
             pos, rot = self.get_end_effector_pos()
