@@ -5,9 +5,8 @@ from sensor_msgs.msg import (
 )
 
 import roslib, rosmsg
-
 import numpy as np
-
+from functools import partial
 import argparse
 
 class Baxter:
@@ -213,6 +212,7 @@ class Baxter:
         def find_boundary(cls, pos, rot):
             Cm = np.linalg.inv(cls.intrinsic_matrix)
             qrot = mathlib.Quaternion.from_xyzw(rot)
+
             width = 1280
             height = 800
 
@@ -220,11 +220,10 @@ class Baxter:
 
             boundary = []
             for p in image_boundary:
-                p =  np.dot(Cm, p)
+                p = np.dot(Cm, p)
                 p = qrot.distance(p[0], p[1], p[2])
                 p += pos
                 boundary.append(p)
-
 
             center = np.dot(Cm, np.array([cls.frame_width, cls.frame_height, 1], dtype=np.float32))
             center = qrot.distance(center[0], center[1], center[2])
@@ -232,6 +231,16 @@ class Baxter:
 
             return center, boundary
 
+        @classmethod
+        def find_point(cls, pos, rot, x, y):
+            Cm = np.linalg.inv(cls.intrinsic_matrix)
+            qrot = mathlib.Quaternion.from_xyzw(rot)
+
+            p = np.dot(Cm, np.array([x, y, 1], dtype=np.float32))
+            p = qrot.distance(p[0], p[1], p[2])
+            p += pos
+
+            return p
 
     def __init__(self, name="pymodules"):
         arg_fmt = argparse.RawDescriptionHelpFormatter
@@ -267,6 +276,8 @@ class Baxter:
         for idx in Defines.ARMS:
             camera_name = idx+"_hand_camera"
             camera = None
+            self._camera[idx] = {}
+
             if first:
                 camera = baxter_interface.CameraController(camera_name)
                 camera.resolution = (640, 400)
@@ -274,11 +285,14 @@ class Baxter:
                 camera.exposure = 100
                 camera.gain = 0
 
-                print("Open camera...")
+                print("Open "+camera_name+"...")
                 camera.open()
 
-            sub = rospy.Subscriber("/cameras/"+camera_name+"/image", Image, lambda x: self.republish_camera(idx, x), None, 1)
+            republish = partial(self.republish_camera, idx)
+
+            sub = rospy.Subscriber("/cameras/"+camera_name+"/image", Image, republish, None, 1)
             self._camera[idx] = {"name": camera_name, "camera": camera, "sub": sub, "image": None}
+
 
         print("Initializing robot...")
         self._display = rospy.Publisher('/robot/xdisplay', Image, queue_size=10)
@@ -307,15 +321,16 @@ class Baxter:
 
     def init(self):
         self.head_angle(0)
+        print("Initialized!!!")
 
     def head_angle(self, angle=0.0):
         self._head.set_pan(angle)
 
-    def get_camera_image(self, type=0, wait=True):
-        while wait and self._camera_image == None:
+    def get_hand_camera_image(self, type=Defines.LEFT, wait=True):
+        while wait and self._camera[type]["image"] == None:
             self._rate.sleep()
 
-        return self._camera_image
+        return self._camera[type]["image"]
 
     def republish_camera(self, idx, msg):
         self._camera[idx]["image"] = msg
