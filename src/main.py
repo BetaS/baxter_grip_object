@@ -73,8 +73,12 @@ class Main:
 
     def run(self):
         object = {}
-
         while self.is_run:
+            #print baxter._arms[Defines.LEFT].get_joint_angle()
+            #continue
+
+            self.update_camera_surface()
+
             m = {}
             for arm in Defines.ARMS:
                 img = baxter.get_hand_camera_image(arm)
@@ -83,15 +87,15 @@ class Main:
                 if len(marker) > 0:
                     m[arm] = list(marker[0]["pos"])
 
-                    # Align for clipped size
-                    m[arm][0] += 1280/4
-                    m[arm][1] += 800/4
-
                     pos, rot = baxter._arms[arm].get_camera_pos()
                     point = baxter.Camera.find_point(pos, rot, m[arm][0], m[arm][1])
                     object[arm] = {"start": pos, "end": point}
 
                     self.print_marker(mat, marker)
+
+                    shape = rvizlib.create_arrow(arm, 2, pos, point, [1, 0, 0])
+                    self.markers.markers.append(shape)
+
 
                 cv2.imshow(self.cv_window["camera"][arm], mat)
 
@@ -104,7 +108,81 @@ class Main:
 
             cv2.waitKey(1)
 
+    def color_blob(self):
+        """
+        cv2.namedWindow("R", 1)
+        cv2.createTrackbar("hueMin", "R", 0, 255, nothing)
+        cv2.createTrackbar("hueMax", "R", 255, 255, nothing)
+        cv2.createTrackbar("satMin", "R", 31, 255, nothing)
+        cv2.createTrackbar("satMax", "R", 212, 255, nothing)
+        cv2.createTrackbar("valMin", "R", 0, 255, nothing)
+        cv2.createTrackbar("valMax", "R", 255, 255, nothing)
+        hm = cv2.getTrackbarPos("hueMin", "R")
+        hM = cv2.getTrackbarPos("hueMax", "R")
+        sm = cv2.getTrackbarPos("satMin", "R")
+        sM = cv2.getTrackbarPos("satMax", "R")
+        vm = cv2.getTrackbarPos("valMin", "R")
+        vM = cv2.getTrackbarPos("valMax", "R")
+        """
+
+        params = cv2.SimpleBlobDetector_Params()
+        params.minDistBetweenBlobs = 50.0
+        params.filterByInertia = False
+        params.filterByConvexity = True
+        params.minConvexity = 0.7
+        params.filterByColor = False
+        params.filterByCircularity = False
+        params.filterByArea = True
+        params.minArea = 200.0
+        params.maxArea = 5000.0
+        detector = cv2.SimpleBlobDetector(params)
+
+        while self.is_run:
+            objects = []
+            cnt = 1
+
+            self.update_camera_surface()
+
+            for arm in Defines.ARMS:
+                img = baxter.get_hand_camera_image(arm)
+                mat = self.cv_bridge.imgmsg_to_cv2(img)
+
+                pos, rot = baxter._arms[arm].get_camera_pos()
+
+                hsv = cv2.cvtColor(mat, cv2.COLOR_BGR2HSV)
+                hsv = cv2.GaussianBlur(hsv, (5, 5), 3)
+                blob = cv2.inRange(hsv, (0, 37, 20), (255, 165, 118))
+
+                blob_info = detector.detect(blob)
+                mat = cv2.drawKeypoints(blob, blob_info, None, (0,0,255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+
+                for keypoint in blob_info:
+                    point = baxter.Camera.find_point(pos, rot, keypoint.pt[0], keypoint.pt[1])
+                    if arm == Defines.LEFT:
+                        objects.append([pos, point])
+                    elif arm == Defines.RIGHT:
+                        min = 0
+                        tp = None
+                        for o in objects:
+                            # Calculate Distance
+                            dist = mathlib.line_intersect_distance(o[0], o[1], pos, point)
+                            if tp == None or min >= dist:
+                                min = dist
+                                tp = o
+
+                        if tp != None:
+                            pt = mathlib.line_intersect_point(tp[0], tp[1], pos, point)
+
+                            shape = rvizlib.create_shape("object", cnt+1, pt)
+                            self.markers.markers.append(shape)
+                            cnt += 1
+
+                cv2.imshow(self.cv_window["camera"][arm], mat)
+
+            cv2.waitKey(1)
+            self.publish_rviz()
+
 
 if __name__ == '__main__':
-    main = Main()
-    main.run()
+    main = Main(False)
+    main.color_blob()

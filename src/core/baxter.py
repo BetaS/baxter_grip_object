@@ -23,11 +23,12 @@ class Baxter:
              [0,1,0]], dtype=np.float32))
 
         def __init__(self, name):
+            self._name = name
             self._limb = baxter_interface.Limb(name)
 
         def get_joint_angle(self):
             angles = self._limb.joint_angles()
-            return np.array([angles["left_s0"], angles["left_s1"], angles["left_e0"], angles["left_e1"], angles["left_w0"], angles["left_w1"], angles["left_w2"]], dtype=np.float32)
+            return np.array([angles[self._name+"_s0"], angles[self._name+"_s1"], angles[self._name+"_e0"], angles[self._name+"_e1"], angles[self._name+"_w0"], angles[self._name+"_w1"], angles[self._name+"_w2"]], dtype=np.float32)
             #return np.array([0, 0, 0, 0, 0, 0, 0], dtype=np.float32)
 
         def get_arm_position(self):
@@ -236,7 +237,7 @@ class Baxter:
             Cm = np.linalg.inv(cls.intrinsic_matrix)
             qrot = mathlib.Quaternion.from_xyzw(rot)
 
-            p = np.dot(Cm, np.array([x, y, 1], dtype=np.float32))
+            p = np.dot(Cm, np.array([x+1280/4, y+800/4, 1], dtype=np.float32))
             p = qrot.distance(p[0], p[1], p[2])
             p += pos
 
