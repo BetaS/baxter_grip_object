@@ -164,6 +164,46 @@ def rotation_matrix(axis, theta):
                      [2*(bd+ac), 2*(cd-ab), aa+dd-bb-cc, 0],
                      [0, 0, 0, 1]])
 
+
+def line_intersect_skewed(l1_start, l1_end, l2_start, l2_end):
+    s1 = l1_start
+    s2 = l2_start
+    v1 = unit_vector(l1_end-l1_start)
+    v2 = unit_vector(l2_end-l2_start)
+
+    r = np.array([0,0,0], dtype=np.float32)
+    t = np.array([0,0,0], dtype=np.float32)
+
+    m = np.identity(3, dtype=np.float32)
+
+    # Precomputed values
+    v1dotv2 = np.dot(v1, v2)
+    v1p2 = np.dot(v1, v1)
+    v2p2 = np.dot(v2, v2)
+
+    # Solving matrix
+    m[0][0] = -v2p2
+    m[1][0] = -v1dotv2
+    m[0][1] = v1dotv2
+    m[1][1] = v1p2
+
+    # Projected vector
+    r[0] = np.dot((s2 - s1), v1)
+    r[1] = np.dot((s2 - s1), v2)
+
+    # precomputed value
+    d = 1.0 / (v1dotv2 * v1dotv2 - v1p2 * v2p2)
+
+    # Compute time values
+    t = d * np.dot(m, r)
+
+    # Compute intersected points on each lines
+    p1 = s1 + np.dot(t[0], v1)
+    p2 = s2 + np.dot(t[1], v2)
+
+    return (p1+p2)/2, dist2(p1, p2)
+
+"""
 def line_intersect_point(l1_start, l1_end, l2_start, l2_end):
     p1, p2, p3, p4 = l1_start, l1_end, l2_start, l2_end
 
@@ -240,82 +280,7 @@ def line_intersect_point(l1_start, l1_end, l2_start, l2_end):
     return ((p2+sc*u)+(p4+tc*v))/2
 
     #return [1, 1, 1]
-
-
-def line_intersect_distance(l1_start, l1_end, l2_start, l2_end):
-    p1, p2, p3, p4 = l1_start, l1_end, l2_start, l2_end
-
-    u = p1 - p2
-    v = p3 - p4
-    w = p2 - p4
-
-    a = np.dot(u,u)
-    b = np.dot(u,v)
-    c = np.dot(v,v)
-    d = np.dot(u,w)
-    e = np.dot(v,w)
-    D = a*c - b*b
-    sD = D
-    tD = D
-
-    SMALL_NUM = 0.00000001
-
-    # compute the line parameters of the two closest points
-    if D < SMALL_NUM:   # the lines are almost parallel
-        sN = 0.0        # force using point P0 on segment S1
-        sD = 1.0        # to prevent possible division by 0.0 later
-        tN = e
-        tD = c
-    else:               # get the closest points on the infinite lines
-        sN = (b*e - c*d)
-        tN = (a*e - b*d)
-
-        if sN < 0.0:    # sc < 0 => the s=0 edge is visible
-            sN = 0.0
-            tN = e
-            tD = c
-        elif sN > sD:   # sc > 1 => the s=1 edge is visible
-            sN = sD
-            tN = e + b
-            tD = c
-
-    if tN < 0.0:        # tc < 0 => the t=0 edge is visible
-        tN = 0.0
-        # recompute sc for this edge
-        if -d < 0.0:
-            sN = 0.0
-        elif -d > a:
-            sN = sD
-        else:
-            sN = -d
-            sD = a
-
-    elif tN > tD:       # tc > 1 => the t=1 edge is visible
-        tN = tD
-        # recompute sc for this edge
-        if (-d + b) < 0.0:
-            sN = 0
-        elif (-d + b) > a:
-            sN = sD
-        else:
-            sN = (-d + b)
-            sD = a
-
-    # finally do the division to get sc and tc
-    if abs(sN) < SMALL_NUM:
-        sc = 0.0
-    else:
-        sc = sN / sD
-
-    if abs(tN) < SMALL_NUM:
-        tc = 0.0
-    else:
-        tc = tN / tD
-
-    # get the difference of the two closest points
-    dP = w + (sc * u) - (tc * v)  # = S1(sc) - S2(tc)
-
-    return sum_of_square(dP)
+"""
 
 def line_intersection(line1, line2):
     xdiff = (line1[0][0] - line1[1][0], line2[0][0] - line2[1][0])
@@ -337,6 +302,12 @@ def dist(a, b):
     dx = a[0] - b[0]
     dy = a[1] - b[1]
     return math.sqrt((dx**2+dy**2))
+
+def dist2(a, b):
+    dx = a[0] - b[0]
+    dy = a[1] - b[1]
+    dz = a[2] - b[2]
+    return math.sqrt((dx**2+dy**2+dz**2))
 
 def center_point(l):
     return center_point2(l[0], l[1], l[2], l[3])

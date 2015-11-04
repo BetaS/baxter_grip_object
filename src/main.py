@@ -100,7 +100,7 @@ class Main:
                 cv2.imshow(self.cv_window["camera"][arm], mat)
 
             if "left" in object and "right" in object:
-                pt = mathlib.line_intersect_point(object["left"]["start"], object["left"]["end"], object["right"]["start"], object["right"]["end"])
+                pt, dist = mathlib.line_intersect_skewed(object["left"]["start"], object["left"]["end"], object["right"]["start"], object["right"]["end"])
                 shape = rvizlib.create_shape("object", 1, pt)
                 self.markers.markers.append(shape)
 
@@ -165,15 +165,13 @@ class Main:
                         tp = None
                         for o in objects:
                             # Calculate Distance
-                            dist = mathlib.line_intersect_distance(o[0], o[1], pos, point)
+                            p, dist = mathlib.line_intersect_skewed(o[0], o[1], pos, point)
                             if tp == None or min >= dist:
                                 min = dist
-                                tp = o
+                                tp = p
 
                         if tp != None:
-                            pt = mathlib.line_intersect_point(tp[0], tp[1], pos, point)
-
-                            shape = rvizlib.create_shape("object", cnt+1, pt)
+                            shape = rvizlib.create_shape("object", cnt+1, tp)
                             self.markers.markers.append(shape)
                             cnt += 1
 
