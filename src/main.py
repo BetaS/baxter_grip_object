@@ -2,8 +2,9 @@
 
 import time
 from src.importer import *
+from interactive_markers.interactive_marker_server import *
 from geometry_msgs.msg import PolygonStamped
-from visualization_msgs.msg import MarkerArray
+from visualization_msgs.msg import MarkerArray, InteractiveMarkerControl
 
 def nothing(x):
     pass
@@ -29,8 +30,8 @@ class Main:
 
         self.cv_bridge = cv_bridge.CvBridge()
 
-        cv2.namedWindow(self.cv_window["camera"][Defines.LEFT], 1)
-        cv2.namedWindow(self.cv_window["camera"][Defines.RIGHT], 1)
+        #cv2.namedWindow(self.cv_window["camera"][Defines.LEFT], 1)
+        #cv2.namedWindow(self.cv_window["camera"][Defines.RIGHT], 1)
         #cv2.createTrackbar("dist", self.cv_window_name, 100, 1000, nothing)
 
     def setup_rviz(self):
@@ -39,8 +40,9 @@ class Main:
         self.pub["camera"][Defines.RIGHT] = rospy.Publisher("/polygon/camera_right", PolygonStamped, queue_size=10)
 
         self.pub["marker"] = rospy.Publisher("visualization_marker_array", MarkerArray, queue_size=10)
-
         self.markers = MarkerArray()
+
+        self.marker_server = InteractiveMarkerServer("simple_marker")
 
     def update_camera_surface(self):
         for arm in Defines.ARMS:
@@ -70,61 +72,9 @@ class Main:
 
     def publish_rviz(self):
         self.pub["marker"].publish(self.markers)
+        self.marker_server.applyChanges()
 
     def run(self):
-        object = {}
-        while self.is_run:
-            #print baxter._arms[Defines.LEFT].get_joint_angle()
-            #continue
-
-            self.update_camera_surface()
-
-            m = {}
-            for arm in Defines.ARMS:
-                img = baxter.get_hand_camera_image(arm)
-                mat = self.cv_bridge.imgmsg_to_cv2(img)
-                marker = self.detect_marker(mat)
-                if len(marker) > 0:
-                    m[arm] = list(marker[0]["pos"])
-
-                    pos, rot = baxter._arms[arm].get_camera_pos()
-                    point = baxter.Camera.find_point(pos, rot, m[arm][0], m[arm][1])
-                    object[arm] = {"start": pos, "end": point}
-
-                    self.print_marker(mat, marker)
-
-                    shape = rvizlib.create_arrow(arm, 2, pos, point, [1, 0, 0])
-                    self.markers.markers.append(shape)
-
-
-                cv2.imshow(self.cv_window["camera"][arm], mat)
-
-            if "left" in object and "right" in object:
-                pt, dist = mathlib.line_intersect_skewed(object["left"]["start"], object["left"]["end"], object["right"]["start"], object["right"]["end"])
-                shape = rvizlib.create_shape("object", 1, pt)
-                self.markers.markers.append(shape)
-
-            self.publish_rviz()
-
-            cv2.waitKey(1)
-
-    def color_blob(self):
-        """
-        cv2.namedWindow("R", 1)
-        cv2.createTrackbar("hueMin", "R", 0, 255, nothing)
-        cv2.createTrackbar("hueMax", "R", 255, 255, nothing)
-        cv2.createTrackbar("satMin", "R", 31, 255, nothing)
-        cv2.createTrackbar("satMax", "R", 212, 255, nothing)
-        cv2.createTrackbar("valMin", "R", 0, 255, nothing)
-        cv2.createTrackbar("valMax", "R", 255, 255, nothing)
-        hm = cv2.getTrackbarPos("hueMin", "R")
-        hM = cv2.getTrackbarPos("hueMax", "R")
-        sm = cv2.getTrackbarPos("satMin", "R")
-        sM = cv2.getTrackbarPos("satMax", "R")
-        vm = cv2.getTrackbarPos("valMin", "R")
-        vM = cv2.getTrackbarPos("valMax", "R")
-        """
-
         params = cv2.SimpleBlobDetector_Params()
         params.minDistBetweenBlobs = 50.0
         params.filterByInertia = False
@@ -139,9 +89,10 @@ class Main:
 
         while self.is_run:
             objects = []
-            cnt = 1
+            cnt = 0
 
             self.update_camera_surface()
+            self.marker_server.clear()
 
             for arm in Defines.ARMS:
                 img = baxter.get_hand_camera_image(arm)
@@ -149,38 +100,78 @@ class Main:
 
                 pos, rot = baxter._arms[arm].get_camera_pos()
 
+                # Convert color to HSV
                 hsv = cv2.cvtColor(mat, cv2.COLOR_BGR2HSV)
+
+                # Smoothing image (for reduce noises)
                 hsv = cv2.GaussianBlur(hsv, (5, 5), 3)
+
+                # Eliminate background color and thresholding
                 blob = cv2.inRange(hsv, (0, 37, 20), (255, 165, 118))
 
+                # Detect object informations from thresholding image
                 blob_info = detector.detect(blob)
-                mat = cv2.drawKeypoints(blob, blob_info, None, (0,0,255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+                #mat = cv2.drawKeypoints(blob, blob_info, None, (0,0,255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
 
+                # Find real world positions for each detected objects
                 for keypoint in blob_info:
+                    # Find real world position from pixel point
                     point = baxter.Camera.find_point(pos, rot, keypoint.pt[0], keypoint.pt[1])
+
+                    # Add object point from primary image
                     if arm == Defines.LEFT:
                         objects.append([pos, point])
+
+                    # Find same object from opposite image
                     elif arm == Defines.RIGHT:
                         min = 0
                         tp = None
                         for o in objects:
                             # Calculate Distance
                             p, dist = mathlib.line_intersect_skewed(o[0], o[1], pos, point)
+
+                            # Find nearest object in opposite image.
                             if tp == None or min >= dist:
                                 min = dist
                                 tp = p
 
+                        # print the object when it's available
                         if tp != None:
-                            shape = rvizlib.create_shape("object", cnt+1, tp)
-                            self.markers.markers.append(shape)
+
+                            # Make interactive marker for mouse selection
+                            int_marker = InteractiveMarker()
+                            int_marker.header.frame_id = "base"
+                            int_marker.name = "object"+str(cnt)
+                            int_marker.pose.position.x = tp[0]
+                            int_marker.pose.position.y = tp[1]
+                            int_marker.pose.position.z = tp[2]
+
+                            # Make marker shape
+                            shape = rvizlib.create_shape("object", cnt, tp)
+
+                            # Add click control
+                            box_control = InteractiveMarkerControl()
+                            box_control.always_visible = True
+                            box_control.interaction_mode = InteractiveMarkerControl.BUTTON
+                            box_control.markers.append( shape )
+
+                            # add the control to the interactive marker
+                            int_marker.controls.append( box_control )
+                            self.marker_server.insert(int_marker, processFeedback)
+
                             cnt += 1
 
-                cv2.imshow(self.cv_window["camera"][arm], mat)
+                #cv2.imshow(self.cv_window["camera"][arm], mat)
 
-            cv2.waitKey(1)
+            #cv2.waitKey(1)
             self.publish_rviz()
 
 
+def processFeedback(feedback):
+    p = feedback.pose.position
+    if feedback.event_type == InteractiveMarkerFeedback.BUTTON_CLICK:
+        print "[CLICK] " + feedback.marker_name + " at (" + str(p.x) + ", " + str(p.y) + ", " + str(p.z)+")"
+
 if __name__ == '__main__':
     main = Main(False)
-    main.color_blob()
+    main.run()

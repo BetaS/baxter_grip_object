@@ -39,7 +39,7 @@ def create_shape(ns, id, pt, rot=[0, 0, 0, 1], color=[1, 0, 0]):
     return marker
 
 
-def delete_arrow(ns, id):
+def delete_shape(ns, id):
     marker = Marker()
     marker.header.frame_id = "base"
     marker.header.stamp = rospy.Time.now()
