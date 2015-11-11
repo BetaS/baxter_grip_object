@@ -36,10 +36,10 @@ class Main:
 
     def setup_rviz(self):
         self.pub["camera"] = {}
-        self.pub["camera"][Defines.LEFT] = rospy.Publisher("/polygon/camera_left", PolygonStamped, queue_size=10)
-        self.pub["camera"][Defines.RIGHT] = rospy.Publisher("/polygon/camera_right", PolygonStamped, queue_size=10)
+        self.pub["camera"][Defines.LEFT] = rospy.Publisher("/polygon/camera_left", PolygonStamped, queue_size=1)
+        self.pub["camera"][Defines.RIGHT] = rospy.Publisher("/polygon/camera_right", PolygonStamped, queue_size=1)
 
-        self.pub["marker"] = rospy.Publisher("visualization_marker_array", MarkerArray, queue_size=10)
+        self.pub["marker"] = rospy.Publisher("visualization_marker_array", MarkerArray, queue_size=100)
         self.markers = MarkerArray()
 
         self.marker_server = InteractiveMarkerServer("simple_marker")
@@ -93,6 +93,7 @@ class Main:
 
             self.update_camera_surface()
             self.marker_server.clear()
+            self.update_camera_surface()
 
             for arm in Defines.ARMS:
                 img = baxter.get_hand_camera_image(arm)
@@ -108,15 +109,57 @@ class Main:
 
                 # Eliminate background color and thresholding
                 blob = cv2.inRange(hsv, (0, 37, 20), (255, 165, 118))
+                """
+                contours, _ = cv2.findContours(blob, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
+                refined_contours = []
+                keypoints = []
+                for idx in range(len(contours)):
+                    contour = contours[idx]
+
+                    if contour.shape[0] < 20 or contour.shape[0] > 150:
+                        continue
+
+                    moment = cv2.moments(contour, True)
+
+                    area = moment["m00"]
+                    arc_l = cv2.arcLength(contour, True)
+
+                    if area < 200 or arc_l < 80:
+                        continue
+
+                    x,y,w,h = cv2.boundingRect(contour)
+                    rect_area = w*h
+                    extent = float(area)/rect_area
+
+                    if extent < 0.45:
+                        continue
+
+                    cx = moment["m10"]/moment["m00"]
+                    cy = moment["m01"]/moment["m00"]
+
+                    keypoints.append([cx, cy])
+                    refined_contours.append(contour)
+
+                cv2.drawContours(mat, refined_contours, -1, (255, 0, 0), -1)
+
+                """
                 # Detect object informations from thresholding image
-                blob_info = detector.detect(blob)
-                #mat = cv2.drawKeypoints(blob, blob_info, None, (0,0,255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+                keypoints = detector.detect(blob)
+                #mat = cv2.drawKeypoints(blob, keypoints, None, (0,0,255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
 
                 # Find real world positions for each detected objects
-                for keypoint in blob_info:
+                idx = 0
+                for keypoint in keypoints:
                     # Find real world position from pixel point
+                    #point = baxter.Camera.find_point(pos, rot, keypoint[0], keypoint[1])
                     point = baxter.Camera.find_point(pos, rot, keypoint.pt[0], keypoint.pt[1])
+
+
+                    # Draw Vectors
+                    arrow = rvizlib.create_arrow(arm, idx, pos, point, [0, 0, 1])
+                    self.markers.markers.append(arrow)
+                    idx += 1
 
                     # Add object point from primary image
                     if arm == Defines.LEFT:
@@ -137,7 +180,6 @@ class Main:
 
                         # print the object when it's available
                         if tp != None:
-
                             # Make interactive marker for mouse selection
                             int_marker = InteractiveMarker()
                             int_marker.header.frame_id = "base"
@@ -146,8 +188,15 @@ class Main:
                             int_marker.pose.position.y = tp[1]
                             int_marker.pose.position.z = tp[2]
 
+                            # Find color ob object
+                            px = keypoint.pt[0]
+                            py = keypoint.pt[1]
+                            color = cv2.mean(mat[py-keypoint.size/4:py+keypoint.size/4, px-keypoint.size/4:px+keypoint.size/4])
+                            color = [color[2]/255, color[1]/255, color[0]/255]
+                            #color = [1, 0, 0]
+
                             # Make marker shape
-                            shape = rvizlib.create_shape("object", cnt, tp)
+                            shape = rvizlib.create_shape("object", cnt, tp, color=color)
 
                             # Add click control
                             box_control = InteractiveMarkerControl()
@@ -161,9 +210,9 @@ class Main:
 
                             cnt += 1
 
-                #cv2.imshow(self.cv_window["camera"][arm], mat)
+                cv2.imshow(self.cv_window["camera"][arm], mat)
 
-            #cv2.waitKey(1)
+            cv2.waitKey(1)
             self.publish_rviz()
 
 

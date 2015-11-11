@@ -283,8 +283,11 @@ class Baxter:
                 camera = baxter_interface.CameraController(camera_name)
                 camera.resolution = (640, 400)
                 camera.fps = 30
-                camera.exposure = 100
-                camera.gain = 0
+                camera.exposure = baxter_interface.CameraController.CONTROL_AUTO
+                camera.gain =  baxter_interface.CameraController.CONTROL_AUTO
+                camera.white_balance_red = baxter_interface.CameraController.CONTROL_AUTO
+                camera.white_balance_green = baxter_interface.CameraController.CONTROL_AUTO
+                camera.white_balance_blue = baxter_interface.CameraController.CONTROL_AUTO
 
                 print("Open "+camera_name+"...")
                 camera.open()
