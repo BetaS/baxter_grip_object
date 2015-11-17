@@ -2,7 +2,7 @@ from geometry_msgs.msg import PolygonStamped, Point32, Pose, Quaternion
 from visualization_msgs.msg import Marker
 import rospy
 
-def create_shape(ns, id, pt, rot=[0, 0, 0, 1], color=[1, 0, 0]):
+def create_shape(ns, id, pt, size=0.1, rot=[0, 0, 0, 1], color=[1, 0, 0]):
     marker = Marker()
     marker.header.frame_id = "base"
     marker.header.stamp = rospy.Time.now()
@@ -11,8 +11,8 @@ def create_shape(ns, id, pt, rot=[0, 0, 0, 1], color=[1, 0, 0]):
     marker.id = id
     marker.type = marker.CUBE
     marker.action = marker.ADD
-    marker.scale.x = 0.1
-    marker.scale.y = 0.1
+    marker.scale.x = size
+    marker.scale.y = size
     marker.scale.z = 0.001
     marker.color.a = 1.0
     marker.color.r = color[0]

@@ -12,15 +12,6 @@ import argparse
 class Baxter:
     class Arm:
         joint_num = 7
-        link_l = np.array([0.2790163480873477, 0.102, 0.2713397434951246, 0.10359, 0.2908719477708361, 0.11597], dtype=np.float32)
-        omegas = np.transpose(np.array(
-            [[0,0,1],
-             [-1,0,0],
-             [0,1,0],
-             [-1,0,0],
-             [0,1,0],
-             [-1,0,0],
-             [0,1,0]], dtype=np.float32))
 
         def __init__(self, name):
             self._name = name
@@ -29,126 +20,66 @@ class Baxter:
         def get_joint_angle(self):
             angles = self._limb.joint_angles()
             return np.array([angles[self._name+"_s0"], angles[self._name+"_s1"], angles[self._name+"_e0"], angles[self._name+"_e1"], angles[self._name+"_w0"], angles[self._name+"_w1"], angles[self._name+"_w2"]], dtype=np.float32)
-            #return np.array([0, 0, 0, 0, 0, 0, 0], dtype=np.float32)
 
-        def get_arm_position(self):
-            P = np.zeros((6, 3))
-            P[0] = [0,0,self.link_l[0]]
-            P[1] = [0,self.link_l[1],self.link_l[0]]
-            P[2] = [0,self.link_l[2]+self.link_l[1],self.link_l[0]]
-            P[3] = [0,self.link_l[3]+self.link_l[2]+self.link_l[1],self.link_l[0]]
-            P[4] = [0,self.link_l[4]+self.link_l[3]+self.link_l[2]+self.link_l[1],self.link_l[0]]
-            P[5] = [0,self.link_l[5]+self.link_l[4]+self.link_l[3]+self.link_l[2]+self.link_l[1],self.link_l[0]]
-            return np.transpose(P)
+        def set_joint_angle(self, target=[], time=5000):
+            time /= 1000.0
 
-        def rotation(self, w, theta):
-            # Rotations : Rodrigues formula
-            e_w_theta = []
-            for k in range(self.joint_num):
-                e_w_theta.append(np.identity(3, dtype=np.float32))
-                e_w_theta[k] += self.skew(w[:,k])*mathlib.math.sin(theta[k])
-                e_w_theta[k] += (self.skew(w[:,k])**2)*(1-mathlib.math.cos(theta[k]))
+            pos = {}
+            if type(target) == list:
+                m = ["s0", "s1", "e0", "e1", "w0", "w1", "w2"]
+                for i in range(len(target)):
+                    if target[i] != None:
+                        pos[self._name+"_"+m[i]] = target[i]
+            else:
+                pos = target
+            print pos
 
-            return e_w_theta
+            self._limb.move_to_joint_positions(pos, time)
 
-        def exponential_mapping(self, theta):
-            # Position vector p(theta) : Exponential mapping
-            P = self.get_arm_position()
-            w = self.omegas
-            e_w_theta = self.rotation(w, theta)
+        def get_joint_position(self):
+            angles = self.get_joint_angle()
+            if self._name == "right":
+                idx = -1
+            else:
+                idx = 1
 
-            q = np.zeros((3,7), dtype=np.float32)
-            v1 = -np.cross(w[:,0],P[:,0])
-            q[:,0] = np.dot((np.identity(3, dtype=np.float32) - e_w_theta[0]), np.cross(w[:,0],v1))+np.dot(np.dot(np.dot(w[:,0],np.transpose(w[:,0])),v1),theta[0])
+            tp = [
+                [0.025, (idx)*0.219, 0.108], # b->mount
+                [0.056, 0, 0.011],     # mount->s0
+                [0.069, 0, 0.27],      # s0->s1
+                [0.102, 0, 0],         # s1->e0
+                [0.069, 0, 0.26242],
+                [0.104, 0, 0],
+                [0.01, 0, 0.271],
+                [0.11597, 0, 0],
+                [0, 0, 0.11355]
+            ]
 
-            for j in range(1, self.joint_num):
-                v = -np.cross(w[:,j], P[:,j-1])
-                q[:,j] = np.dot((np.identity(3, dtype=np.float32)-e_w_theta[j]),np.cross(w[:,j],v))+np.dot(np.dot(np.dot(w[:,j],np.transpose(w[:,j])),v),theta[j])
+            rot = [
+                [0,      0,         0           ],
+                [-0.002, 0.001,     (idx)*0.780      ], # b->mount
+                [0,      0,         angles[0]   ], # mount->s0
+                [-1.571, 0,         angles[1]   ], # s0->s1
+                [ 1.571, -1.571,    angles[2]   ], # s1->e0
+                [0,      1.571-angles[3],  0    ], # e0->e1
+                [0,      -1.571,    angles[4]   ], # e1->w0
+                [0,      1.571-angles[5],  0    ], # w0->w1
+                [0,     -1.571 ,    angles[6]   ]  # w1->w2
+            ]
 
-            e_xi_theta = []
-            for a in range(self.joint_num):
-                e_xi_theta.append(np.identity((4), dtype=np.float32))
-                e_xi_theta[a][:3,:3] = e_w_theta[a]
-                e_xi_theta[a][3,:3] = q[:,a]
+            start = np.array([0, 0, 0])
+            end = start
+            pre = np.eye(3)
+            ret = [[0, 0, 0]]
+            for i in range(9):
+                rm = np.dot(pre, mathlib.eular_to_rotation_matrix(rot[i][0], rot[i][1], rot[i][2]))
+                end = start+np.dot(rm, tp[i])
+                start = end
+                ret.append(end)
 
-            return e_xi_theta
+                pre = rm
 
-        def adjoint_transform(self, theta):
-            # joint_num is not necessarily 7
-            # It is not affected by link_l ?
-            # Rotation Matrix
-            e_xi_theta = self.exponential_mapping(theta);
-
-            # products of e_xi_theta : (4x4)-matrix
-            R =np.identity(4, dtype=np.float32)
-            for i in range(self.joint_num-1):
-                R = e_xi_theta[i] * R
-
-
-            #Adjoint Transformation "Ad" : (6x6)-matrix
-
-            Ad = np.identity(6, dtype=np.float32)
-            Ad[0:3,0:3] = R[:3,:3]
-            Ad[3:6,0:3] = np.zeros((3,3), dtype=np.float32)
-            skew_R = self.skew(R[:3, 3])
-            Ad[0:3,3:6] = np.dot(skew_R, R[:3, :3])
-            Ad[3:6,3:6] = R[:3,:3]
-            return Ad
-
-        def skew(self, vec):
-            # gives the skew symmetric matrix
-            return  np.array([[0, -vec[2], vec[1]],
-                              [vec[2], 0, -vec[0]],
-                              [-vec[1], vec[0], 0]], dtype=np.float32)
-
-        def get_twist(self, P, w):
-            xi = np.zeros((7, 6))
-
-            xi[0] = np.concatenate((-1*np.cross(w[:,0],P[:,0]), w[:,0]), axis=0)
-            for i in range(1, self.joint_num):
-                xi[i] = np.concatenate((-1*np.cross(w[:,i], P[:,i-1]), w[:,i]), axis=0)
-
-            return np.transpose(xi)
-
-        def get_xi_prime(self, xi):
-            xi_prime = np.zeros((6, 7))
-
-            for i in range(self.joint_num):
-                for j in range(i):
-                    if i == 1:
-                        xi_prime[:,i-1] = xi[:,i-1]
-                    else:
-                        xi_prime[:,i-1] = np.dot(self.adjoint_transform(self.get_joint_angle()), xi[:,i-1])
-
-            return xi_prime
-
-        def get_spatial_jacobian(self):
-            # Position of each joint : (3x6)-matrix
-            # For Forward Kinematics, we need to form Jacobian for Baxter's arm.
-            # J is Spatial Jacobian, which is a (6x7)-matrix.
-            # Spatial Jacobian is for the world frame( universal coordinate).
-            # 6 is for (x,y,z,roll,pitch,yaw) (-> if we use Quaternion, then is it 7??)
-            # joint_num(Number of Joints in Baxter's arm) is 7.
-            # link_l 6x1 vector of link lengths
-            # theta 7x1 vector of angles
-
-            P = self.get_arm_position()
-
-            # Omegas : (3x7)-matrix
-            w = self.omegas
-
-            # Twist : (6x7)-matrix
-            xi = self.get_twist(P, w)
-
-            # For making Jacobian, we need xi_prime : (6x7)-matrix
-            xi_prime = self.get_xi_prime(xi)
-
-            # J : (6x7)-matrix
-            J = np.zeros((6, 7))
-            for k in range(self.joint_num):
-                 J[:,k] = xi_prime[:,k]
-
-            return J
+            return ret
 
         def get_end_effector_pos(self):
             pose = self._limb.endpoint_pose()
@@ -284,13 +215,14 @@ class Baxter:
                 camera.resolution = (640, 400)
                 camera.fps = 30
                 camera.exposure = baxter_interface.CameraController.CONTROL_AUTO
-                camera.gain =  baxter_interface.CameraController.CONTROL_AUTO
+                camera.gain = baxter_interface.CameraController.CONTROL_AUTO
                 camera.white_balance_red = baxter_interface.CameraController.CONTROL_AUTO
                 camera.white_balance_green = baxter_interface.CameraController.CONTROL_AUTO
                 camera.white_balance_blue = baxter_interface.CameraController.CONTROL_AUTO
+                camera.half_resolution = False
 
                 print("Open "+camera_name+"...")
-                camera.open()
+                #camera.open()
 
             republish = partial(self.republish_camera, idx)
 
