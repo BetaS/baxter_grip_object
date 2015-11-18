@@ -50,7 +50,14 @@ def delete_shape(ns, id):
 
     return marker
 
-def create_arrow(ns, id, start, end, color=[1, 0, 0]):
+def create_axis(ns, id, pos, ori):
+    arrow_x = create_arrow("axis_x_"+ns, id, pos, pos+ori.distance(0.1, 0, 0), color=[1, 0, 0], size=[0.01, 0.02, 0.02])
+    arrow_y = create_arrow("axis_y_"+ns, id, pos, pos+ori.distance(0, 0.1, 0), color=[0, 1, 0], size=[0.01, 0.02, 0.02])
+    arrow_z = create_arrow("axis_z_"+ns, id, pos, pos+ori.distance(0, 0, 0.1), color=[0, 0, 1], size=[0.01, 0.02, 0.02])
+
+    return [arrow_x, arrow_y, arrow_z]
+
+def create_arrow(ns, id, start, end, color=[1, 0, 0], size=[0.02, 0.05, 0.05]):
     marker = Marker()
     marker.header.frame_id = "base"
     marker.header.stamp = rospy.Time.now()
@@ -58,9 +65,9 @@ def create_arrow(ns, id, start, end, color=[1, 0, 0]):
     marker.id = id
     marker.type = marker.ARROW
     marker.action = marker.ADD
-    marker.scale.x = 0.02
-    marker.scale.y = 0.05
-    marker.scale.z = 0.05
+    marker.scale.x = size[0]
+    marker.scale.y = size[1]
+    marker.scale.z = size[2]
     marker.color.a = 1.0
     marker.color.r = color[0]
     marker.color.g = color[1]

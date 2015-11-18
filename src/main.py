@@ -57,11 +57,24 @@ class Main:
 
     def update_arm_position(self):
         for arm in Defines.ARMS:
-            angles = baxter._arms[arm].get_joint_position()
+            angles = baxter._arms[arm].get_joint_pose(Baxter.Arm.JOINT_HAND, True)
 
+            """
             for i in range(1, len(angles)):
-                arrow = rvizlib.create_arrow("tf_"+arm, i, angles[i-1], angles[i])
+                arrow = rvizlib.create_arrow("tf_"+arm, i, angles[i-1]["pos"], angles[i]["pos"])
                 self.markers.markers.append(arrow)
+
+            """
+            for i in range(0, len(angles)):
+
+                arrow_x = rvizlib.create_arrow("tf_"+arm, i*3+0, angles[i]["pos"], angles[i]["pos"]+angles[i]["ori"].distance(0.1, 0, 0), color=[1, 0, 0], size=[0.01, 0.02, 0.02])
+                arrow_y = rvizlib.create_arrow("tf_"+arm, i*3+1, angles[i]["pos"], angles[i]["pos"]+angles[i]["ori"].distance(0, 0.1, 0), color=[0, 1, 0], size=[0.01, 0.02, 0.02])
+                arrow_z = rvizlib.create_arrow("tf_"+arm, i*3+2, angles[i]["pos"], angles[i]["pos"]+angles[i]["ori"].distance(0, 0, 0.1), color=[0, 0, 1], size=[0.01, 0.02, 0.02])
+
+                self.markers.markers.append(arrow_x)
+                self.markers.markers.append(arrow_y)
+                self.markers.markers.append(arrow_z)
+
 
     def detect_marker(self, mat):
         # Find Camera Matrix
@@ -145,29 +158,29 @@ class Main:
 
                     # Find same object from opposite image
                     elif arm == Defines.RIGHT:
-                        min = 0
-                        tp = None # target_point
-                        tidx = None # target_idx
+                        intersect_object = {}
                         for k in range(len(objects)):
                             o = objects[k]
+
+                            # Calculate Distance
+                            p, dist = mathlib.line_intersect_skewed(o[0], o[1], pos, point)
+
+                            # Find nearest object in opposite image.
+                            if dist < 0.05:
+                                intersect_object[k] = [o, p]
+
+                        min = None
+
+                        for j in intersect_object:
                             # Calculate Color Distance
-                            dist = mathlib.color_distance(color, o[2])
+                            color_dist = graphiclib.color_distance(color, intersect_object[j][0][2])
 
-                            if dist < 15:
-                                # Calculate Distance
-                                p, dist = mathlib.line_intersect_skewed(o[0], o[1], pos, point)
-
-                                # Find nearest object in opposite image.
-                                if tp == None or min >= dist:
-                                    min = dist
-                                    tp = p
-                                    tidx = k
+                            if min == None or min["color"] > color_dist:
+                                min = {"color": color_dist, "idx": j, "tp": intersect_object[j][1]}
 
                         # print the object when it's available
-                        # dist approx is 5cm
-                        if tp != None and min < 0.05:
-                            # delete object from set
-                            del objects[tidx]
+                        if min != None:
+                            tp = min["tp"]
 
                             # Make interactive marker for mouse selection
                             int_marker = InteractiveMarker()
@@ -192,6 +205,9 @@ class Main:
                             int_marker.controls.append( box_control )
                             self.marker_server.insert(int_marker, processFeedback)
 
+                            # delete object from set
+                            del objects[min["idx"]]
+
                             cnt += 1
 
                 cv2.imshow(self.cv_window["camera"][arm], blob)
@@ -204,6 +220,29 @@ class Main:
             self.update_arm_position()
             self.publish_rviz()
 
+    def simulate_joint_position(self):
+        arm = "left"
+
+        while True:
+
+            angles = baxter._arms[arm].get_joint_pose(Baxter.Arm.JOINT_HAND, all_info=True)
+            for i in range(1, len(angles)):
+                arrow = rvizlib.create_arrow("tf_"+arm, i, angles[i-1]["pos"], angles[i]["pos"])
+                self.markers.markers.append(arrow)
+
+            for i in range(0, len(angles)):
+                axis = rvizlib.create_axis("tf", i, angles[i]["pos"], angles[i]["ori"])
+                self.markers.markers.extend(axis)
+
+
+            pose = angles[10]["pos"].tolist()+angles[10]["ori"].decompose()
+            pose = robotlib.translate_to_shoulder_frame(pose)
+
+            self.markers.markers.append(rvizlib.create_arrow("dp", 1, angles[2]["pos"], angles[2]["pos"]+pose[0:3]))
+            self.markers.markers.extend(rvizlib.create_axis("dp", 11, angles[2]["pos"]+pose[0:3], mathlib.Quaternion.from_xyzw(pose[3:7])))
+
+            self.publish_rviz()
+
 
 def processFeedback(feedback):
     p = feedback.pose.position
@@ -213,14 +252,15 @@ def processFeedback(feedback):
 if __name__ == '__main__':
     main = Main(False)
 
-    #home_position = [0.02837864, -1.1336118, -0.7593205, 0.97676229, -0.27343208, 1.70080125, 0.09932525]
+    home_position = [0.02837864, -1.1336118, -0.7593205, 0.97676229, -0.27343208, 1.70080125, 0.09932525]
     #home_position = [0, 0, 0, 0, 0, 0, 0]
-    #home_position = [-2.3813, -0.4400,2.2258, -0.5469,  -1.2152,1.2126,0.9519]
-    #baxter._arms[Defines.LEFT].set_joint_angle(home_position)
-    #baxter._arms[Defines.RIGHT].set_joint_angle(mathlib.reflex_joint_angles(home_position))
+    #home_position = [-0.8598, 0.5846, 0.1318, -1.4543, 0.6806, 0.3411, -1.1776]
+    #home_position = [0.0103, 0.0178, -0.0126, -0.0084, 0.0271, -0.0122, -0.0140]
+    baxter._arms[Defines.LEFT].set_joint_angle(home_position)
+    #baxter._arms[Defines.RIGHT].set_joint_angle(robotlib.reflex_joint_angles(home_position))
 
-    #print baxter._arms[Defines.LEFT].get_end_effector_pos()
+    print baxter._arms[Defines.LEFT].get_end_effector_pos()
+    print baxter._arms[Defines.LEFT].get_joint_angle()
 
     #main.run()
-
-    main.forward_position()
+    main.simulate_joint_position()

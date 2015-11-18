@@ -12,10 +12,52 @@ import argparse
 class Baxter:
     class Arm:
         joint_num = 7
+        JOINT_BASE  = 0
+        JOINT_MOUNT = 1
+        JOINT_S0    = 2
+        JOINT_S1    = 3
+        JOINT_E0    = 4
+        JOINT_E1    = 5
+        JOINT_W0    = 6
+        JOINT_W1    = 7
+        JOINT_W2    = 8
+        JOINT_HAND  = 9
 
         def __init__(self, name):
             self._name = name
             self._limb = baxter_interface.Limb(name)
+
+            if name == "right":
+                idx = -1
+            else:
+                idx = 1
+
+            self.joint_translate = np.array([
+                [0.025,     idx*0.219,  0.108   ], # b->mount
+                [0.056,     0,          0.011   ], # mount->s0
+                [0.069,     0,          0.27    ], # s0->s1
+                [0.102,     0,          0       ], # s1->e0
+                [0.069,     0,          0.26242 ], # e0->e1
+                [0.104,     0,          0       ], # e1->w0
+                [0.01,      0,          0.271   ], # w0->w1
+                [0.11597,   0,          0       ], # w1->w2
+                [0,         0,          0.11355 ], # w2->hand
+                [0,         0,          0.045   ]  # hand->gripper
+            ], dtype=np.float32)
+
+            self.joint_axis = np.array([
+                [0,      0,         0           ],
+                [-0.002, 0.001,     (idx)*0.780 ], # b->mount
+                [0,      0,         0           ], # mount->s0
+                [-1.571, 0,         0           ], # s0->s1
+                [ 1.571, -1.571,    0           ], # s1->e0
+                [-1.571, 0,         -1.571      ], # e0->e1
+                [0,      -1.571,    1.571       ], # e1->w0
+                [-1.571, 0,         -1.571      ], # w0->w1
+                [0,      -1.571,    1.571       ], # w1->w2
+                [0,      0,         0           ], # w2->hand
+                [0,      0,         0           ]  # hand->gripper
+            ], dtype=np.float32)
 
         def get_joint_angle(self):
             angles = self._limb.joint_angles()
@@ -32,64 +74,60 @@ class Baxter:
                         pos[self._name+"_"+m[i]] = target[i]
             else:
                 pos = target
-            print pos
 
             self._limb.move_to_joint_positions(pos, time)
 
-        def get_joint_position(self):
-            angles = self.get_joint_angle()
-            if self._name == "right":
-                idx = -1
+        def get_joint_pose(self, joint, angles=None, all_info=False):
+            if not angles:
+                j = self.get_joint_angle()
             else:
-                idx = 1
+                j = angles;
 
-            tp = [
-                [0.025, (idx)*0.219, 0.108], # b->mount
-                [0.056, 0, 0.011],     # mount->s0
-                [0.069, 0, 0.27],      # s0->s1
-                [0.102, 0, 0],         # s1->e0
-                [0.069, 0, 0.26242],
-                [0.104, 0, 0],
-                [0.01, 0, 0.271],
-                [0.11597, 0, 0],
-                [0, 0, 0.11355]
-            ]
+            joint_angles = np.array([
+                [0,     0,      0   ], # offset
+                [0,     0,      0   ], # b->mount
+                [0,     0,      j[0]], # mount->s0
+                [0,     0,      j[1]], # s0->s1
+                [0,     0,      j[2]], # s1->e0
+                [0,     0,      j[3]], # e0->e1
+                [0,     0,      j[4]], # e1->w0
+                [0,     0,      j[5]], # w0->w1
+                [0,     0,      j[6]], # w1->w2
+                [0,     0,      0   ], # w2->hand
+                [0,     0,      0   ]  # hand->gripper
+            ], dtype=np.float32)
 
-            rot = [
-                [0,      0,         0           ],
-                [-0.002, 0.001,     (idx)*0.780      ], # b->mount
-                [0,      0,         angles[0]   ], # mount->s0
-                [-1.571, 0,         angles[1]   ], # s0->s1
-                [ 1.571, -1.571,    angles[2]   ], # s1->e0
-                [0,      1.571-angles[3],  0    ], # e0->e1
-                [0,      -1.571,    angles[4]   ], # e1->w0
-                [0,      1.571-angles[5],  0    ], # w0->w1
-                [0,     -1.571 ,    angles[6]   ]  # w1->w2
-            ]
+            # Set Axis
+            joint_angles += self.joint_axis
 
             start = np.array([0, 0, 0])
             end = start
             pre = np.eye(3)
-            ret = [[0, 0, 0]]
-            for i in range(9):
-                rm = np.dot(pre, mathlib.eular_to_rotation_matrix(rot[i][0], rot[i][1], rot[i][2]))
-                end = start+np.dot(rm, tp[i])
+            ret = []
+            for i in range(joint+1):
+                rm = np.dot(pre, mathlib.eular_to_rotation_matrix(joint_angles[i][0], joint_angles[i][1], joint_angles[i][2]))
+                end = start+np.dot(rm, self.joint_translate[i])
+
+                q = mathlib.Quaternion.from_matrix(rm)
+                if all_info:
+                    ret.append({"pos":start, "ori":q})
+
                 start = end
-                ret.append(end)
 
                 pre = rm
 
+            if joint+1 <= len(self.joint_axis):
+                pre = np.dot(pre, mathlib.eular_to_rotation_matrix(joint_angles[joint+1][0], joint_angles[joint+1][1], joint_angles[joint+1][2]))
+
+            q = mathlib.Quaternion.from_matrix(pre)
+            ret.append({"pos":end, "ori":q})
             return ret
 
         def get_end_effector_pos(self):
-            pose = self._limb.endpoint_pose()
-            pos = pose["position"]
-            rot = pose["orientation"]
-            return [pos.x, pos.y, pos.z], [rot.x, rot.y, rot.z, rot.w]
-
-        def get_end_effector_pos2(self):
-            pose = np.dot(self.get_spatial_jacobian(), self.get_joint_angle())
-            return pose[:3], pose[3:6]
+            pose = self.get_joint_pose(self.JOINT_HAND)
+            pos = pose[0]["pos"]
+            rot = pose[0]["ori"]
+            return [pos[0], pos[1], pos[2]], [rot._x, rot._y, rot._z, rot._w]
 
         def get_camera_pos(self):
             pos, rot = self.get_end_effector_pos()
