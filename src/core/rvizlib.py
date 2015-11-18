@@ -2,7 +2,7 @@ from geometry_msgs.msg import PolygonStamped, Point32, Pose, Quaternion
 from visualization_msgs.msg import Marker
 import rospy
 
-def create_shape(ns, id, pt, size=0.1, rot=[0, 0, 0, 1], color=[1, 0, 0]):
+def create_shape(holder, ns, id, pt, size=0.1, rot=[0, 0, 0, 1], color=[1, 0, 0]):
     marker = Marker()
     marker.header.frame_id = "base"
     marker.header.stamp = rospy.Time.now()
@@ -36,10 +36,9 @@ def create_shape(ns, id, pt, size=0.1, rot=[0, 0, 0, 1], color=[1, 0, 0]):
 
     marker.pose = p
 
-    return marker
+    holder.markers.append(marker)
 
-
-def delete_shape(ns, id):
+def delete_shape(holder, ns, id):
     marker = Marker()
     marker.header.frame_id = "base"
     marker.header.stamp = rospy.Time.now()
@@ -48,16 +47,14 @@ def delete_shape(ns, id):
     marker.type = marker.ARROW
     marker.action = marker.DELETE
 
-    return marker
+    holder.markers.append(marker)
 
-def create_axis(ns, id, pos, ori):
-    arrow_x = create_arrow("axis_x_"+ns, id, pos, pos+ori.distance(0.1, 0, 0), color=[1, 0, 0], size=[0.01, 0.02, 0.02])
-    arrow_y = create_arrow("axis_y_"+ns, id, pos, pos+ori.distance(0, 0.1, 0), color=[0, 1, 0], size=[0.01, 0.02, 0.02])
-    arrow_z = create_arrow("axis_z_"+ns, id, pos, pos+ori.distance(0, 0, 0.1), color=[0, 0, 1], size=[0.01, 0.02, 0.02])
+def create_axis(holder, ns, id, pos, ori):
+    create_arrow("axis_x_"+ns, id, pos, pos+ori.distance(0.1, 0, 0), color=[1, 0, 0], size=[0.01, 0.02, 0.02])
+    create_arrow("axis_y_"+ns, id, pos, pos+ori.distance(0, 0.1, 0), color=[0, 1, 0], size=[0.01, 0.02, 0.02])
+    create_arrow("axis_z_"+ns, id, pos, pos+ori.distance(0, 0, 0.1), color=[0, 0, 1], size=[0.01, 0.02, 0.02])
 
-    return [arrow_x, arrow_y, arrow_z]
-
-def create_arrow(ns, id, start, end, color=[1, 0, 0], size=[0.02, 0.05, 0.05]):
+def create_arrow(holder, ns, id, start, end, color=[1, 0, 0], size=[0.02, 0.05, 0.05]):
     marker = Marker()
     marker.header.frame_id = "base"
     marker.header.stamp = rospy.Time.now()
@@ -84,10 +81,10 @@ def create_arrow(ns, id, start, end, color=[1, 0, 0], size=[0.02, 0.05, 0.05]):
     marker.points.append(s)
     marker.points.append(e)
 
-    return marker
+    holder.markers.append(marker)
 
 
-def create_arrow2(ns, id, start, rot, dist, color=[1, 0, 0]):
+def create_arrow2(holder, ns, id, start, rot, dist, color=[1, 0, 0]):
     marker = Marker()
     marker.header.frame_id = "base"
     marker.header.stamp = rospy.Time.now()
@@ -116,7 +113,7 @@ def create_arrow2(ns, id, start, rot, dist, color=[1, 0, 0]):
     marker.points.append(s)
     marker.points.append(e)
 
-    return marker
+    holder.markers.append(marker)
 
 def create_polygon_list(points):
     p = PolygonStamped()

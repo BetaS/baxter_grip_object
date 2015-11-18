@@ -42,39 +42,30 @@ class Main:
 
         self.marker_server = InteractiveMarkerServer("simple_marker")
 
-    def update_camera_surface(self):
-        for arm in Defines.ARMS:
-            pos, rot = baxter._arms[arm].get_camera_pos()
-            center, bound = Baxter.Camera.find_boundary(pos, rot)
+    def draw_camera_surface(self, arm):
+        pos, rot = baxter._arms[arm].get_camera_pos()
+        center, bound = Baxter.Camera.find_boundary(pos, rot)
 
-            # Create Camera Surface Polys
-            p = rvizlib.create_polygon_list(bound)
-            self.pub["camera"][arm].publish(p)
+        # Create Camera Surface Polys
+        p = rvizlib.create_polygon_list(bound)
+        self.pub["camera"][arm].publish(p)
 
-            # Create Normal Vector Marker
-            marker = rvizlib.create_arrow(arm, 1, pos, center, [0, 1, 0])
-            self.markers.markers.append(marker)
+        # Create Normal Vector Marker
+        rvizlib.create_arrow(self.markers, arm, 1, pos, center, [0, 1, 0])
 
-    def update_arm_position(self):
-        for arm in Defines.ARMS:
-            angles = baxter._arms[arm].get_joint_pose(Baxter.Arm.JOINT_HAND, True)
 
-            """
-            for i in range(1, len(angles)):
-                arrow = rvizlib.create_arrow("tf_"+arm, i, angles[i-1]["pos"], angles[i]["pos"])
-                self.markers.markers.append(arrow)
+    def draw_arm_position(self, arm):
+        angles = baxter._arms[arm].get_joint_pose(Baxter.Arm.JOINT_HAND, True)
 
-            """
-            for i in range(0, len(angles)):
+        for i in range(1, len(angles)):
+            arrow = rvizlib.create_arrow(self.markers, "tf_"+arm, i, angles[i-1]["pos"], angles[i]["pos"])
 
-                arrow_x = rvizlib.create_arrow("tf_"+arm, i*3+0, angles[i]["pos"], angles[i]["pos"]+angles[i]["ori"].distance(0.1, 0, 0), color=[1, 0, 0], size=[0.01, 0.02, 0.02])
-                arrow_y = rvizlib.create_arrow("tf_"+arm, i*3+1, angles[i]["pos"], angles[i]["pos"]+angles[i]["ori"].distance(0, 0.1, 0), color=[0, 1, 0], size=[0.01, 0.02, 0.02])
-                arrow_z = rvizlib.create_arrow("tf_"+arm, i*3+2, angles[i]["pos"], angles[i]["pos"]+angles[i]["ori"].distance(0, 0, 0.1), color=[0, 0, 1], size=[0.01, 0.02, 0.02])
+        for i in range(0, len(angles)):
+            rvizlib.create_axis(self.markers, "tf_"+arm, i, angles[i]["pos"], angles[i]["pos"]+angles[i]["ori"])
 
-                self.markers.markers.append(arrow_x)
-                self.markers.markers.append(arrow_y)
-                self.markers.markers.append(arrow_z)
-
+    def publish_rviz(self):
+        self.pub["marker"].publish(self.markers)
+        self.marker_server.applyChanges()
 
     def detect_marker(self, mat):
         # Find Camera Matrix
@@ -88,10 +79,6 @@ class Main:
     def print_marker(self, mat, markers):
         for m in markers:
             cv2.fillConvexPoly(mat, np.array(m["bound"], np.int32), m["color"])
-
-    def publish_rviz(self):
-        self.pub["marker"].publish(self.markers)
-        self.marker_server.applyChanges()
 
     def run(self):
         params = cv2.SimpleBlobDetector_Params()
@@ -192,14 +179,11 @@ class Main:
 
                             #color = [1, 0, 0]
 
-                            # Make marker shape
-                            shape = rvizlib.create_shape("object", cnt, tp, size=0.05, color=color)
-
                             # Add click control
                             box_control = InteractiveMarkerControl()
                             box_control.always_visible = True
                             box_control.interaction_mode = InteractiveMarkerControl.BUTTON
-                            box_control.markers.append( shape )
+                            rvizlib.create_shape(box_control, "object", cnt, tp, size=0.05, color=color)
 
                             # add the control to the interactive marker
                             int_marker.controls.append( box_control )
@@ -224,7 +208,6 @@ class Main:
         arm = "left"
 
         while True:
-
             angles = baxter._arms[arm].get_joint_pose(Baxter.Arm.JOINT_HAND, all_info=True)
             for i in range(1, len(angles)):
                 arrow = rvizlib.create_arrow("tf_"+arm, i, angles[i-1]["pos"], angles[i]["pos"])
@@ -238,8 +221,8 @@ class Main:
             pose = angles[10]["pos"].tolist()+angles[10]["ori"].decompose()
             pose = robotlib.translate_to_shoulder_frame(pose)
 
-            self.markers.markers.append(rvizlib.create_arrow("dp", 1, angles[2]["pos"], angles[2]["pos"]+pose[0:3]))
-            self.markers.markers.extend(rvizlib.create_axis("dp", 11, angles[2]["pos"]+pose[0:3], mathlib.Quaternion.from_xyzw(pose[3:7])))
+            rvizlib.create_arrow(self.markers, "dp", 1, angles[2]["pos"], angles[2]["pos"]+pose[0:3])
+            rvizlib.create_axis(self.markers, "dp", 11, angles[2]["pos"]+pose[0:3], mathlib.Quaternion.from_xyzw(pose[3:7]))
 
             self.publish_rviz()
 
