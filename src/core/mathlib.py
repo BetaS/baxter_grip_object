@@ -81,6 +81,10 @@ class Quaternion:
 
         return Quaternion(x,y,z,w)
 
+    @classmethod
+    def from_euler(cls, euler):
+        pass
+
     def __str__(self):
         return "x = "+str(self._x)+", y = "+str(self._y)+", z = "+str(self._z)+", w = "+str(self._w)
 
@@ -150,6 +154,14 @@ class Quaternion:
     def decompose(self):
         return [self._x, self._y, self._z, self._w]
 
+def tr2diff(t1, t2):
+    IR = np.dot(np.linalg.inv(t2), t1)
+    DT = t1[0:3,3]-t2[0:3,3]
+    DR = Quaternion.from_matrix(IR[0:3,0:3])
+    DR = DR.to_euler()
+
+    return np.array([DT[0], DT[1], DT[2], DR[0], DR[1], DR[2]], dtype=np.float32)
+
 # Get sum of square from data list
 def sum_of_square(data):
     return sum(map(lambda x: x**2, data))
@@ -161,16 +173,27 @@ def var(data):
 
     return _var(sum_of_square(data), sum(data), len(data))*10
 
+def length_vector(vec):
+    s = sum(vec)
+    return s/len(vec)
+
+def mag_vector(vec):
+    s = sum_of_square(vec)
+    return math.sqrt(s)
+
 def unit_vector(vec):
-    mag  = math.sqrt(vec[0]**2+vec[1]**2+vec[2]**2)
+    mag = mag_vector(vec)
     return [vec[0]/mag, vec[1]/mag, vec[2]/mag]
 
 def translate_matrix(x, y, z):
     return np.array([
-        [1,         0,      0,      -x],
-        [0,         1,      0,      -y],
-        [0,         0,      1,      -z],
+        [1,         0,      0,      x],
+        [0,         1,      0,      y],
+        [0,         0,      1,      z],
         [0,         0,      0,      1]], dtype=np.float32)
+
+def translate_matrix2(l):
+    return translate_matrix(l[0], l[1], l[2])
 
 def eular_to_rotation_matrix(R, P, Y):
     RX = np.array([
@@ -179,9 +202,9 @@ def eular_to_rotation_matrix(R, P, Y):
         [0, math.sin(R),  math.cos(R)]], dtype=np.float32)
 
     RY = np.array([
-        [math.cos(P), 0, -math.sin(P)],
-        [          0, 1,            0],
-        [math.sin(P), 0,  math.cos(P)]], dtype=np.float32)
+        [math.cos(P),  0,  math.sin(P)],
+        [          0,  1,            0],
+        [-math.sin(P), 0,  math.cos(P)]], dtype=np.float32)
 
     RZ = np.array([
         [math.cos(Y), -math.sin(Y), 0],
@@ -189,6 +212,9 @@ def eular_to_rotation_matrix(R, P, Y):
         [0,            0,           1]], dtype=np.float32)
 
     return np.dot(np.dot(RX,RY),RZ)
+
+def eular_to_rotation_matrix2(l):
+    return eular_to_rotation_matrix(l[0], l[1], l[2])
 
 def eular_to_dir_vector(R, P, Y):
     x = math.cos(Y)*math.cos(P)

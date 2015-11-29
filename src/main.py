@@ -3,7 +3,7 @@
 import time
 from src.importer import *
 from interactive_markers.interactive_marker_server import *
-from geometry_msgs.msg import PolygonStamped
+from geometry_msgs.msg import PolygonStamped, Pose, Point, Quaternion
 from visualization_msgs.msg import MarkerArray, InteractiveMarkerControl
 
 def nothing(x):
@@ -55,13 +55,13 @@ class Main:
 
 
     def draw_arm_position(self, arm):
-        angles = baxter._arms[arm].get_joint_pose(Baxter.Arm.JOINT_HAND, True)
-
+        angles = baxter._arms[arm].get_joint_pose(Baxter.Arm.JOINT_HAND, all_info=True)
+        """
         for i in range(1, len(angles)):
-            arrow = rvizlib.create_arrow(self.markers, "tf_"+arm, i, angles[i-1]["pos"], angles[i]["pos"])
-
+            rvizlib.create_arrow(self.markers, "tf_"+arm, i, angles[i-1]["pos"], angles[i]["pos"])
+        """
         for i in range(0, len(angles)):
-            rvizlib.create_axis(self.markers, "tf_"+arm, i, angles[i]["pos"], angles[i]["pos"]+angles[i]["ori"])
+            rvizlib.create_axis(self.markers, "tf_"+arm, i, angles[i]["pos"], angles[i]["ori"])
 
     def publish_rviz(self):
         self.pub["marker"].publish(self.markers)
@@ -97,11 +97,12 @@ class Main:
             objects = []
             cnt = 0
 
-            self.update_camera_surface()
             self.marker_server.clear()
-            self.update_camera_surface()
 
             for arm in Defines.ARMS:
+                self.draw_camera_surface(arm)
+                self.draw_arm_position(arm)
+
                 img = baxter.get_hand_camera_image(arm)
                 mat = self.cv_bridge.imgmsg_to_cv2(img)
 
@@ -135,8 +136,7 @@ class Main:
                     point = baxter.Camera.find_point(pos, rot, keypoint.pt[0], keypoint.pt[1])
 
                     # Draw Vectors
-                    arrow = rvizlib.create_arrow(arm, idx, pos, point, color)
-                    self.markers.markers.append(arrow)
+                    rvizlib.create_arrow(self.markers, arm, idx, pos, point, color)
                     idx += 1
 
                     # Add object point from primary image
@@ -204,46 +204,71 @@ class Main:
             self.update_arm_position()
             self.publish_rviz()
 
-    def simulate_joint_position(self):
-        arm = "left"
-
-        while True:
-            angles = baxter._arms[arm].get_joint_pose(Baxter.Arm.JOINT_HAND, all_info=True)
-            for i in range(1, len(angles)):
-                arrow = rvizlib.create_arrow("tf_"+arm, i, angles[i-1]["pos"], angles[i]["pos"])
-                self.markers.markers.append(arrow)
-
-            for i in range(0, len(angles)):
-                axis = rvizlib.create_axis("tf", i, angles[i]["pos"], angles[i]["ori"])
-                self.markers.markers.extend(axis)
-
-
-            pose = angles[10]["pos"].tolist()+angles[10]["ori"].decompose()
-            pose = robotlib.translate_to_shoulder_frame(pose)
-
-            rvizlib.create_arrow(self.markers, "dp", 1, angles[2]["pos"], angles[2]["pos"]+pose[0:3])
-            rvizlib.create_axis(self.markers, "dp", 11, angles[2]["pos"]+pose[0:3], mathlib.Quaternion.from_xyzw(pose[3:7]))
-
-            self.publish_rviz()
-
+import math
 
 def processFeedback(feedback):
     p = feedback.pose.position
     if feedback.event_type == InteractiveMarkerFeedback.BUTTON_CLICK:
         print "[CLICK] " + feedback.marker_name + " at (" + str(p.x) + ", " + str(p.y) + ", " + str(p.z)+")"
 
+        angles = baxter._arms[Defines.LEFT].get_joint_angle()
+        pos = [ 0.20703122, 0.77710983, 0.31864885]
+        rot = mathlib.Quaternion.from_euler([2.880644176473962, 1.5683547289343642, -2.0990489867913644])
+        angles = [0, 0, 0, 0, 0, 0, 0]
+        result = baxter._arms[Defines.LEFT]._kin.inverse_kinematics(pos, None, angles)
+
+        #result = baxter._arms[Defines.LEFT]._kin.inverse_kinematics([p.x, p.y, p.z+0.1], None, angles)
+        print "[INVKIN] "+str(p.x)+", "+str(p.y)+", "+str(p.z)
+        if result != None:
+            for i in range(0, 7):
+                result[i] = math.radians(result[i])
+            #result += angles
+            baxter._arms[Defines.LEFT].set_joint_angle(result.tolist())
+
+        print result
+
 if __name__ == '__main__':
     main = Main(False)
 
-    home_position = [0.02837864, -1.1336118, -0.7593205, 0.97676229, -0.27343208, 1.70080125, 0.09932525]
+    #home_position = [-0.0543, -2.8186, -1.5383, 1.9077, 0.4807, 1.0787, 0.3275]
+    home_position = [-1.0426821095740018, 0.5173414269013347, 1.441594731869995, 1.8060577350724691, -2.512244319531336, 0.3583257396836843, -0.24057972956145984]
+    #[0.13460681, -1.37329626, -0.97791272, 1.03083503, -0.1599175, 1.74375272, 0.11006312]
     #home_position = [0, 0, 0, 0, 0, 0, 0]
     #home_position = [-0.8598, 0.5846, 0.1318, -1.4543, 0.6806, 0.3411, -1.1776]
     #home_position = [0.0103, 0.0178, -0.0126, -0.0084, 0.0271, -0.0122, -0.0140]
     baxter._arms[Defines.LEFT].set_joint_angle(home_position)
     #baxter._arms[Defines.RIGHT].set_joint_angle(robotlib.reflex_joint_angles(home_position))
 
-    print baxter._arms[Defines.LEFT].get_end_effector_pos()
-    print baxter._arms[Defines.LEFT].get_joint_angle()
+    print  baxter._arms[Defines.LEFT].get_joint_angle()
+    """
+    pos, rot = baxter._arms[Defines.LEFT].get_end_effector_pos()
+    pose = baxter._arms[Defines.LEFT].get_joint_pose(Baxter.Arm.JOINT_HAND, home_position, False)
+    pose = pose[0]["pos"].tolist()+pose[0]["ori"].decompose()
+    print pose
+    pose = robotlib.translate_to_shoulder_frame(pose)
+    print pose
+    """
+
+
+    angles = baxter._arms[Defines.LEFT].get_joint_angle()
+    pos = Point(x=0.20703122, y=0.77710983, z=0.31864885)
+    #rot = Quaternion([2.880644176473962, 1.5683547289343642, -2.0990489867913644])
+    angles = [0, 0, 0, 0, 0, 0, 0]
+    #result = baxter._arms[Defines.LEFT]._kin.inverse_kinematics(pos, None, angles)
+    #result = baxter._arms[Defines.LEFT]._kin.inverse(Pose(position=pos))
+
+    #print "[INVKIN] "+str(pos[0])+", "+str(pos[1])+", "+str(pos[2])
+    #print "[INVKIN] "+str(result)
+    #if result != None:
+    #    for i in range(0, 7):
+    #        result[i] = math.radians(result[i])
+        #result += angles
+    #    baxter._arms[Defines.LEFT].set_joint_angle(result.tolist())
 
     #main.run()
-    main.simulate_joint_position()
+
+    """
+    while True:
+        main.draw_arm_position("left")
+        main.publish_rviz()
+    """

@@ -1,6 +1,8 @@
 import rospy
 import baxter_interface
 
+import baxter_kdl.kdl_kinematics as pykdl
+
 import numpy as np
 import cv2, cv_bridge
 

@@ -1,4 +1,4 @@
-from src.importer import rospy, mathlib, baxter_interface, CHECK_VERSION, Defines
+from src.importer import rospy, robotlib, mathlib, baxter_interface, pykdl, CHECK_VERSION, Defines
 
 from sensor_msgs.msg import (
     Image,
@@ -11,53 +11,17 @@ import argparse
 
 class Baxter:
     class Arm:
-        joint_num = 7
-        JOINT_BASE  = 0
-        JOINT_MOUNT = 1
-        JOINT_S0    = 2
-        JOINT_S1    = 3
-        JOINT_E0    = 4
-        JOINT_E1    = 5
-        JOINT_W0    = 6
-        JOINT_W1    = 7
-        JOINT_W2    = 8
-        JOINT_HAND  = 9
-
         def __init__(self, name):
             self._name = name
             self._limb = baxter_interface.Limb(name)
+            self._kin = pykdl.create_kdl_kin(name+"_arm_mount", name+"_wrist")
+
+            self.joint_translate = robotlib.joint_translate.copy()
+            self.joint_axis = robotlib.joint_axis.copy()
 
             if name == "right":
-                idx = -1
-            else:
-                idx = 1
-
-            self.joint_translate = np.array([
-                [0.025,     idx*0.219,  0.108   ], # b->mount
-                [0.056,     0,          0.011   ], # mount->s0
-                [0.069,     0,          0.27    ], # s0->s1
-                [0.102,     0,          0       ], # s1->e0
-                [0.069,     0,          0.26242 ], # e0->e1
-                [0.104,     0,          0       ], # e1->w0
-                [0.01,      0,          0.271   ], # w0->w1
-                [0.11597,   0,          0       ], # w1->w2
-                [0,         0,          0.11355 ], # w2->hand
-                [0,         0,          0.045   ]  # hand->gripper
-            ], dtype=np.float32)
-
-            self.joint_axis = np.array([
-                [0,      0,         0           ],
-                [-0.002, 0.001,     (idx)*0.780 ], # b->mount
-                [0,      0,         0           ], # mount->s0
-                [-1.571, 0,         0           ], # s0->s1
-                [ 1.571, -1.571,    0           ], # s1->e0
-                [-1.571, 0,         -1.571      ], # e0->e1
-                [0,      -1.571,    1.571       ], # e1->w0
-                [-1.571, 0,         -1.571      ], # w0->w1
-                [0,      -1.571,    1.571       ], # w1->w2
-                [0,      0,         0           ], # w2->hand
-                [0,      0,         0           ]  # hand->gripper
-            ], dtype=np.float32)
+                self.joint_translate[0,1] *= -1
+                self.joint_axis[1,2] *= -1
 
         def get_joint_angle(self):
             angles = self._limb.joint_angles()
@@ -81,7 +45,7 @@ class Baxter:
             if not angles:
                 j = self.get_joint_angle()
             else:
-                j = angles;
+                j = angles
 
             joint_angles = np.array([
                 [0,     0,      0   ], # offset
@@ -295,7 +259,6 @@ class Baxter:
 
     def init(self):
         self.head_angle(0)
-        print("Initialized!!!")
 
     def head_angle(self, angle=0.0):
         self._head.set_pan(angle)

@@ -50,9 +50,9 @@ def delete_shape(holder, ns, id):
     holder.markers.append(marker)
 
 def create_axis(holder, ns, id, pos, ori):
-    create_arrow("axis_x_"+ns, id, pos, pos+ori.distance(0.1, 0, 0), color=[1, 0, 0], size=[0.01, 0.02, 0.02])
-    create_arrow("axis_y_"+ns, id, pos, pos+ori.distance(0, 0.1, 0), color=[0, 1, 0], size=[0.01, 0.02, 0.02])
-    create_arrow("axis_z_"+ns, id, pos, pos+ori.distance(0, 0, 0.1), color=[0, 0, 1], size=[0.01, 0.02, 0.02])
+    create_arrow(holder, "axis_x_"+ns, id, pos, pos+ori.distance(0.1, 0, 0), color=[1, 0, 0], size=[0.01, 0.02, 0.02])
+    create_arrow(holder, "axis_y_"+ns, id, pos, pos+ori.distance(0, 0.1, 0), color=[0, 1, 0], size=[0.01, 0.02, 0.02])
+    create_arrow(holder, "axis_z_"+ns, id, pos, pos+ori.distance(0, 0, 0.1), color=[0, 0, 1], size=[0.01, 0.02, 0.02])
 
 def create_arrow(holder, ns, id, start, end, color=[1, 0, 0], size=[0.02, 0.05, 0.05]):
     marker = Marker()
