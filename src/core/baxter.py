@@ -1,27 +1,52 @@
-from src.importer import rospy, robotlib, mathlib, baxter_interface, pykdl, CHECK_VERSION, Defines
+from src.importer import rospy, mathlib, baxter_interface, pykdl, CHECK_VERSION, Defines
+
+import src.core.robotlib as robotlib
 
 from sensor_msgs.msg import (
-    Image,
+    Image, Range,
 )
 
 import roslib, rosmsg
 import numpy as np
+import math
 from functools import partial
 import argparse
 
 class Baxter:
     class Arm:
+        home_position = [0.13460681, -1.37329626, -0.97791272, 1.03083503, -0.1599175, 1.74375272, 0.11006312]
+
         def __init__(self, name):
             self._name = name
             self._limb = baxter_interface.Limb(name)
             self._kin = pykdl.create_kdl_kin(name+"_arm_mount", name+"_wrist")
+            self._home_position = list(self.home_position)
 
             self.joint_translate = robotlib.joint_translate.copy()
             self.joint_axis = robotlib.joint_axis.copy()
 
+            self._range = -1
+            self._range_sub = rospy.Subscriber("/robot/range/"+name+"_hand_range/state", Range, self._range_republish, None, 1)
+
             if name == "right":
                 self.joint_translate[0,1] *= -1
                 self.joint_axis[1,2] *= -1
+                self._home_position = robotlib.reflex_joint_angles(self._home_position)
+
+        def disable(self):
+            self._range_sub.unregister()
+
+        def _range_republish(self, msg):
+            if msg.range >= msg.max_range or msg.range <= msg.min_range:
+                self._range = -1
+            else:
+                self._range = msg.range
+
+        def get_range(self):
+            return self._range
+
+        def home(self):
+            self.set_joint_angle(self._home_position)
 
         def get_joint_angle(self):
             angles = self._limb.joint_angles()
@@ -41,7 +66,7 @@ class Baxter:
 
             self._limb.move_to_joint_positions(pos, time)
 
-        def get_joint_pose(self, joint, angles=None, all_info=False):
+        def get_joint_pose(self, joint=robotlib.JOINT_HAND, angles=None, all_info=False):
             if not angles:
                 j = self.get_joint_angle()
             else:
@@ -88,7 +113,7 @@ class Baxter:
             return ret
 
         def get_end_effector_pos(self):
-            pose = self.get_joint_pose(self.JOINT_HAND)
+            pose = self.get_joint_pose(robotlib.JOINT_HAND)
             pos = pose[0]["pos"]
             rot = pose[0]["ori"]
             return [pos[0], pos[1], pos[2]], [rot._x, rot._y, rot._z, rot._w]
@@ -100,6 +125,18 @@ class Baxter:
             rot = q*mathlib.Quaternion(0.000, 0.000, -0.707, 0.707)
             rot = rot.decompose()
             return pos, rot
+
+        def move_to_pose(self, pos, ori):
+            joints = self.get_joint_angle()
+            th, dist = robotlib.inv_kin(self._name, joints, pos, ori)
+            err = np.linalg.norm(dist[0:3])
+            if err < 0.01:
+                self.set_joint_angle(th)
+                return True
+
+            print "[INVKIN] Failed at "+str(dist)
+
+            return False
 
     class Camera:
         distort_matrix = np.array(
@@ -251,6 +288,9 @@ class Baxter:
         for idx in self._camera:
             self._camera[idx]["sub"].unregister()
 
+        for idx in self._arms:
+            self._arms[idx].disable()
+
         self.init()
 
         if not self._init_state and self._rs.state().enabled:
@@ -259,6 +299,8 @@ class Baxter:
 
     def init(self):
         self.head_angle(0)
+        self._arms[Defines.LEFT].home()
+        self._arms[Defines.RIGHT].home()
 
     def head_angle(self, angle=0.0):
         self._head.set_pan(angle)
@@ -271,6 +313,15 @@ class Baxter:
 
     def republish_camera(self, idx, msg):
         self._camera[idx]["image"] = msg
+
+    def get_camera_pos(self, arm):
+        return self._arms[arm].get_camera_pos()
+
+    def get_all_joint_pose(self, arm):
+        return self._arms[arm].get_joint_pose(all_info=True)
+
+    def move_arm(self, arm, pos, ori=[math.pi, 0, 0]):
+        return self._arms[arm].move_to_pose(pos, ori)
 
     def display(self, img):
         self._display.publish(img)

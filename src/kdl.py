@@ -1,24 +1,17 @@
 
-from src.importer import
+from src.importer import *
+
+import math
 
 def main():
-    baxter.start(False)
-
     joints = baxter._arms[Defines.LEFT].get_joint_angle()
+    th, dist = robotlib.inv_kin("left", joints, [0.8, 0.2, 0.0], [math.pi, 0, 0])
 
-    target = robotlib.GST(joints)
-    target = target[7]
-    pos = target[0:3,3]
-
-    angle = mathlib.Quaternion.from_matrix(target[0:3,0:3])
-    angle = angle.to_euler()
-
-    print pos, angle
-
-    th, dist = robotlib.inv_kin("left", joints, [0.5, -0.4, 0.2], [0, 0, 0])
     print dist
 
-    baxter._arms[Defines.LEFT].set_joint_angle(th)
+    baxter._arms[Defines.LEFT].set_joint_angle(th, time=10000)
 
+import time
 if __name__ == "__main__":
+    baxter.start(False)
     main()

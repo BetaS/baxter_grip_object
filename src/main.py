@@ -3,8 +3,15 @@
 import time
 from src.importer import *
 from interactive_markers.interactive_marker_server import *
-from geometry_msgs.msg import PolygonStamped, Pose, Point, Quaternion
-from visualization_msgs.msg import MarkerArray, InteractiveMarkerControl
+from geometry_msgs.msg import PolygonStamped
+from visualization_msgs.msg import MarkerArray
+
+STATUS_INIT             = 0
+STATUS_DETECT_MARKER    = 1
+STATUS_DETECT_OBJECT    = 2
+STATUS_MOVE_TO_OBJECT   = 3
+STATUS_ALIGN_TO_OBJECT  = 4
+STATUS_GRASP_OBJECT     = 5
 
 def nothing(x):
     pass
@@ -21,6 +28,10 @@ class Main:
         self.setup_cv()
         self.setup_rviz()
 
+        self.object_pos = [0, 0, 0]
+        self.forus_arm = "left"
+        self.status = STATUS_INIT
+
     def setup_cv(self):
         self.cv_window = {}
         self.cv_window["camera"] = {}
@@ -28,6 +39,21 @@ class Main:
         self.cv_window["camera"][Defines.RIGHT] = "right_hand"
 
         self.cv_bridge = cv_bridge.CvBridge()
+
+        params = cv2.SimpleBlobDetector_Params()
+        params.minDistBetweenBlobs = 50.0
+        params.filterByInertia = False
+        params.filterByConvexity = True
+        params.minConvexity = 0.7
+        params.filterByColor = False
+        params.filterByCircularity = False
+        params.filterByArea = True
+        params.minArea = 200.0
+        params.maxArea = 5000.0
+
+        detector = cv2.SimpleBlobDetector(params)
+
+        self.detector = detector
 
         cv2.namedWindow(self.cv_window["camera"][Defines.LEFT], 1)
         #cv2.namedWindow(self.cv_window["camera"][Defines.RIGHT], 1)
@@ -43,7 +69,7 @@ class Main:
         self.marker_server = InteractiveMarkerServer("simple_marker")
 
     def draw_camera_surface(self, arm):
-        pos, rot = baxter._arms[arm].get_camera_pos()
+        pos, rot = baxter.get_camera_pos(arm)
         center, bound = Baxter.Camera.find_boundary(pos, rot)
 
         # Create Camera Surface Polys
@@ -53,9 +79,8 @@ class Main:
         # Create Normal Vector Marker
         rvizlib.create_arrow(self.markers, arm, 1, pos, center, [0, 1, 0])
 
-
     def draw_arm_position(self, arm):
-        angles = baxter._arms[arm].get_joint_pose(Baxter.Arm.JOINT_HAND, all_info=True)
+        angles = baxter.get_all_joint_pose(arm)
         """
         for i in range(1, len(angles)):
             rvizlib.create_arrow(self.markers, "tf_"+arm, i, angles[i-1]["pos"], angles[i]["pos"])
@@ -76,199 +101,240 @@ class Main:
 
         return markerlib.MarkerDetection(hsv, edge)
 
-    def print_marker(self, mat, markers):
+    def detect_blob(self, mat):
+        # Convert color to HSV
+        hsv = cv2.cvtColor(mat, cv2.COLOR_BGR2HSV)
+
+        # Smoothing image (for reduce noises)
+        hsv = cv2.GaussianBlur(hsv, (5, 5), 3)
+
+        # Eliminate background color and thresholding
+        blob = cv2.inRange(hsv, (0, 37, 20), (255, 165, 118))
+
+        # Detect object informations from thresholding image
+        return self.detector.detect(blob)
+
+    def print_marker(self, mat, markers, color=None):
         for m in markers:
-            cv2.fillConvexPoly(mat, np.array(m["bound"], np.int32), m["color"])
+            c = m["color"]
+            if color != None:
+                c = color
+
+            cv2.fillConvexPoly(mat, np.array(m["bound"], np.int32), c)
+
+    def process_init(self):
+        baxter.init()
+        self.status = STATUS_DETECT_MARKER
+
+    def process_detect_marker(self):
+        objects = []
+        cnt = 0
+
+        for arm in Defines.ARMS:
+            #self.draw_camera_surface(arm)
+            #self.draw_arm_position(arm)
+
+            img = baxter.get_hand_camera_image(arm)
+            mat = self.cv_bridge.imgmsg_to_cv2(img)
+
+            pos, rot = baxter.get_camera_pos(arm)
+
+            markers = self.detect_marker(mat)
+
+            idx = 0
+            for marker in markers:
+                # Find color of object
+                px = marker["pos"][0]
+                py = marker["pos"][1]
+                color = marker["color"]
+                color = [color[2]/255, color[1]/255, color[0]/255]
+
+                # Find real world position from pixel point
+                #point = baxter.Camera.find_point(pos, rot, keypoint[0], keypoint[1])
+                point = baxter.Camera.find_point(pos, rot, px, py)
+
+                # Draw Vectors
+                rvizlib.create_arrow(self.markers, arm, idx, pos, point, color)
+                idx += 1
+
+                # Add object point from primary image
+                if arm == Defines.LEFT:
+                    objects.append([pos, point, color])
+
+                # Find same object from opposite image
+                elif arm == Defines.RIGHT:
+                    intersect_object = {}
+                    for k in range(len(objects)):
+                        o = objects[k]
+
+                        # Calculate Distance
+                        p, dist = mathlib.line_intersect_skewed(o[0], o[1], pos, point)
+
+                        # Find nearest object in opposite image.
+                        if dist < 0.05:
+                            intersect_object[k] = [o, p]
+
+                    min = None
+
+                    for j in intersect_object:
+                        # Calculate Color Distance
+                        color_dist = graphiclib.color_distance(color, intersect_object[j][0][2])
+
+                        if min == None or min["color"] > color_dist:
+                            min = {"color": color_dist, "idx": j, "tp": intersect_object[j][1]}
+
+                    # print the object when it's available
+                    if min != None:
+                        tp = min["tp"]
+                        rvizlib.create_interactive_marker(self.marker_server, cnt, tp, 0.05, color, self.click_marker)
+
+                        # delete object from set
+                        del objects[min["idx"]]
+
+                        cnt += 1
+
+    def process_detect_object(self):
+        objects = []
+        cnt = 0
+
+        for arm in Defines.ARMS:
+            #self.draw_camera_surface(arm)
+            #self.draw_arm_position(arm)
+
+            img = baxter.get_hand_camera_image(arm)
+            mat = self.cv_bridge.imgmsg_to_cv2(img)
+
+            # remove markers
+            markers = self.detect_marker(mat)
+            self.print_marker(mat, markers, [255, 255, 255])
+
+            # find the blobs
+            keypoints = self.detect_blob(mat)
+
+            pos, rot = baxter.get_camera_pos(arm)
+
+            #mat = cv2.drawKeypoints(blob, keypoints, None, (0,0,255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+
+            # Find real world positions for each detected objects
+            idx = 0
+            for keypoint in keypoints:
+                # Find color of object
+                px = keypoint.pt[0]
+                py = keypoint.pt[1]
+                color = cv2.mean(mat[py-keypoint.size/10:py+keypoint.size/10, px-keypoint.size/10:px+keypoint.size/10])
+                color = [color[2]/255, color[1]/255, color[0]/255]
+
+                # Find real world position from pixel point
+                #point = baxter.Camera.find_point(pos, rot, keypoint[0], keypoint[1])
+                point = baxter.Camera.find_point(pos, rot, px, py)
+
+                # Draw Vectors
+                rvizlib.create_arrow(self.markers, arm, idx, pos, point, color)
+                idx += 1
+
+                # Add object point from primary image
+                if arm == Defines.LEFT:
+                    objects.append([pos, point, color])
+
+                # Find same object from opposite image
+                elif arm == Defines.RIGHT:
+                    intersect_object = {}
+                    for k in range(len(objects)):
+                        o = objects[k]
+
+                        # Calculate Distance
+                        p, dist = mathlib.line_intersect_skewed(o[0], o[1], pos, point)
+
+                        # Find nearest object in opposite image.
+                        if dist < 0.05:
+                            intersect_object[k] = [o, p]
+
+                    min = None
+
+                    for j in intersect_object:
+                        # Calculate Color Distance
+                        color_dist = graphiclib.color_distance(color, intersect_object[j][0][2])
+
+                        if min == None or min["color"] > color_dist:
+                            min = {"color": color_dist, "idx": j, "tp": intersect_object[j][1]}
+
+                    # print the object when it's available
+                    if min != None:
+                        tp = min["tp"]
+
+                        rvizlib.create_interactive_marker(self.marker_server, cnt, tp, 0.05, color, self.click_object)
+
+                        # delete object from set
+                        del objects[min["idx"]]
+
+                        cnt += 1
+
+            #cv2.imshow(self.cv_window["camera"][arm], blob)
+
+    def process_move_to_object(self):
+        pos = self.object_pos
+        pos[2] = pos[2] + 0.1
+
+        if baxter.move_arm(self.focus_arm, pos):
+            self.status = STATUS_ALIGN_TO_OBJECT
+        else:
+            baxter.init()
+            self.status = STATUS_DETECT_OBJECT
+
+    def process_align_to_object(self):
+        # Find object
+        img = baxter.get_hand_camera_image(self.focus_arm)
+        mat = self.cv_bridge.imgmsg_to_cv2(img)
+
+        self.detect_blob(mat)
+        #
+
+        pass
 
     def run(self):
-        params = cv2.SimpleBlobDetector_Params()
-        params.minDistBetweenBlobs = 50.0
-        params.filterByInertia = False
-        params.filterByConvexity = True
-        params.minConvexity = 0.7
-        params.filterByColor = False
-        params.filterByCircularity = False
-        params.filterByArea = True
-        params.minArea = 200.0
-        params.maxArea = 5000.0
-        detector = cv2.SimpleBlobDetector(params)
-
         while self.is_run:
-            objects = []
-            cnt = 0
-
             self.marker_server.clear()
 
-            for arm in Defines.ARMS:
-                self.draw_camera_surface(arm)
-                self.draw_arm_position(arm)
+            if self.status == STATUS_INIT:
+                self.process_init()
+            elif self.status == STATUS_DETECT_MARKER:
+                self.process_detect_marker()
+            elif self.status == STATUS_DETECT_OBJECT:
+                self.process_detect_object()
+            elif self.status == STATUS_MOVE_TO_OBJECT:
+                self.process_move_to_object()
+            elif self.status == STATUS_ALIGN_TO_OBJECT:
+                self.process_align_to_object()
 
-                img = baxter.get_hand_camera_image(arm)
-                mat = self.cv_bridge.imgmsg_to_cv2(img)
-
-                #cv2.imwrite("sample.png", mat)
-
-                pos, rot = baxter._arms[arm].get_camera_pos()
-
-                # Convert color to HSV
-                hsv = cv2.cvtColor(mat, cv2.COLOR_BGR2HSV)
-
-                # Smoothing image (for reduce noises)
-                hsv = cv2.GaussianBlur(hsv, (5, 5), 3)
-
-                # Eliminate background color and thresholding
-                blob = cv2.inRange(hsv, (0, 37, 20), (255, 165, 118))
-                                # Detect object informations from thresholding image
-                keypoints = detector.detect(blob)
-                #mat = cv2.drawKeypoints(blob, keypoints, None, (0,0,255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
-
-                # Find real world positions for each detected objects
-                idx = 0
-                for keypoint in keypoints:
-                    # Find color of object
-                    px = keypoint.pt[0]
-                    py = keypoint.pt[1]
-                    color = cv2.mean(mat[py-keypoint.size/10:py+keypoint.size/10, px-keypoint.size/10:px+keypoint.size/10])
-                    color = [color[2]/255, color[1]/255, color[0]/255]
-
-                    # Find real world position from pixel point
-                    #point = baxter.Camera.find_point(pos, rot, keypoint[0], keypoint[1])
-                    point = baxter.Camera.find_point(pos, rot, keypoint.pt[0], keypoint.pt[1])
-
-                    # Draw Vectors
-                    rvizlib.create_arrow(self.markers, arm, idx, pos, point, color)
-                    idx += 1
-
-                    # Add object point from primary image
-                    if arm == Defines.LEFT:
-                        objects.append([pos, point, color])
-
-                    # Find same object from opposite image
-                    elif arm == Defines.RIGHT:
-                        intersect_object = {}
-                        for k in range(len(objects)):
-                            o = objects[k]
-
-                            # Calculate Distance
-                            p, dist = mathlib.line_intersect_skewed(o[0], o[1], pos, point)
-
-                            # Find nearest object in opposite image.
-                            if dist < 0.05:
-                                intersect_object[k] = [o, p]
-
-                        min = None
-
-                        for j in intersect_object:
-                            # Calculate Color Distance
-                            color_dist = graphiclib.color_distance(color, intersect_object[j][0][2])
-
-                            if min == None or min["color"] > color_dist:
-                                min = {"color": color_dist, "idx": j, "tp": intersect_object[j][1]}
-
-                        # print the object when it's available
-                        if min != None:
-                            tp = min["tp"]
-
-                            # Make interactive marker for mouse selection
-                            int_marker = InteractiveMarker()
-                            int_marker.header.frame_id = "base"
-                            int_marker.name = "object"+str(cnt)
-                            int_marker.pose.position.x = tp[0]
-                            int_marker.pose.position.y = tp[1]
-                            int_marker.pose.position.z = tp[2]
-
-                            #color = [1, 0, 0]
-
-                            # Add click control
-                            box_control = InteractiveMarkerControl()
-                            box_control.always_visible = True
-                            box_control.interaction_mode = InteractiveMarkerControl.BUTTON
-                            rvizlib.create_shape(box_control, "object", cnt, tp, size=0.05, color=color)
-
-                            # add the control to the interactive marker
-                            int_marker.controls.append( box_control )
-                            self.marker_server.insert(int_marker, processFeedback)
-
-                            # delete object from set
-                            del objects[min["idx"]]
-
-                            cnt += 1
-
-                cv2.imshow(self.cv_window["camera"][arm], blob)
-
-            cv2.waitKey(1)
+            #cv2.waitKey(1)
             self.publish_rviz()
 
-    def forward_position(self):
-        while True:
-            self.update_arm_position()
-            self.publish_rviz()
+    def click_marker(self, feedback):
+        p = feedback.pose.position
+        if feedback.event_type == InteractiveMarkerFeedback.BUTTON_CLICK:
+            print "[CLICK] " + feedback.marker_name + " at (" + str(p.x) + ", " + str(p.y) + ", " + str(p.z)+")"
 
-import math
+            self.object_pos = [p.x, p.y, p.z]
+            if p.y >= 0:
+                self.focus_arm = "left"
+            else:
+                self.focus_arm = "right"
 
-def processFeedback(feedback):
-    p = feedback.pose.position
-    if feedback.event_type == InteractiveMarkerFeedback.BUTTON_CLICK:
-        print "[CLICK] " + feedback.marker_name + " at (" + str(p.x) + ", " + str(p.y) + ", " + str(p.z)+")"
+            self.status = STATUS_DETECT_OBJECT
 
-        angles = baxter._arms[Defines.LEFT].get_joint_angle()
-        pos = [ 0.20703122, 0.77710983, 0.31864885]
-        rot = mathlib.Quaternion.from_euler([2.880644176473962, 1.5683547289343642, -2.0990489867913644])
-        angles = [0, 0, 0, 0, 0, 0, 0]
-        result = baxter._arms[Defines.LEFT]._kin.inverse_kinematics(pos, None, angles)
+    def click_object(self, feedback):
+        p = feedback.pose.position
+        if feedback.event_type == InteractiveMarkerFeedback.BUTTON_CLICK:
+            print "[CLICK] " + feedback.marker_name + " at (" + str(p.x) + ", " + str(p.y) + ", " + str(p.z)+")"
 
-        #result = baxter._arms[Defines.LEFT]._kin.inverse_kinematics([p.x, p.y, p.z+0.1], None, angles)
-        print "[INVKIN] "+str(p.x)+", "+str(p.y)+", "+str(p.z)
-        if result != None:
-            for i in range(0, 7):
-                result[i] = math.radians(result[i])
-            #result += angles
-            baxter._arms[Defines.LEFT].set_joint_angle(result.tolist())
+            self.object_pos = [p.x, p.y, p.z]
+            if p.y >= 0:
+                self.focus_arm = "left"
+            else:
+                self.focus_arm = "right"
 
-        print result
+            self.status = STATUS_MOVE_TO_OBJECT
 
 if __name__ == '__main__':
     main = Main(False)
-
-    #home_position = [-0.0543, -2.8186, -1.5383, 1.9077, 0.4807, 1.0787, 0.3275]
-    home_position = [-1.0426821095740018, 0.5173414269013347, 1.441594731869995, 1.8060577350724691, -2.512244319531336, 0.3583257396836843, -0.24057972956145984]
-    #[0.13460681, -1.37329626, -0.97791272, 1.03083503, -0.1599175, 1.74375272, 0.11006312]
-    #home_position = [0, 0, 0, 0, 0, 0, 0]
-    #home_position = [-0.8598, 0.5846, 0.1318, -1.4543, 0.6806, 0.3411, -1.1776]
-    #home_position = [0.0103, 0.0178, -0.0126, -0.0084, 0.0271, -0.0122, -0.0140]
-    baxter._arms[Defines.LEFT].set_joint_angle(home_position)
-    #baxter._arms[Defines.RIGHT].set_joint_angle(robotlib.reflex_joint_angles(home_position))
-
-    print  baxter._arms[Defines.LEFT].get_joint_angle()
-    """
-    pos, rot = baxter._arms[Defines.LEFT].get_end_effector_pos()
-    pose = baxter._arms[Defines.LEFT].get_joint_pose(Baxter.Arm.JOINT_HAND, home_position, False)
-    pose = pose[0]["pos"].tolist()+pose[0]["ori"].decompose()
-    print pose
-    pose = robotlib.translate_to_shoulder_frame(pose)
-    print pose
-    """
-
-
-    angles = baxter._arms[Defines.LEFT].get_joint_angle()
-    pos = Point(x=0.20703122, y=0.77710983, z=0.31864885)
-    #rot = Quaternion([2.880644176473962, 1.5683547289343642, -2.0990489867913644])
-    angles = [0, 0, 0, 0, 0, 0, 0]
-    #result = baxter._arms[Defines.LEFT]._kin.inverse_kinematics(pos, None, angles)
-    #result = baxter._arms[Defines.LEFT]._kin.inverse(Pose(position=pos))
-
-    #print "[INVKIN] "+str(pos[0])+", "+str(pos[1])+", "+str(pos[2])
-    #print "[INVKIN] "+str(result)
-    #if result != None:
-    #    for i in range(0, 7):
-    #        result[i] = math.radians(result[i])
-        #result += angles
-    #    baxter._arms[Defines.LEFT].set_joint_angle(result.tolist())
-
-    #main.run()
-
-    """
-    while True:
-        main.draw_arm_position("left")
-        main.publish_rviz()
-    """
+    main.run()

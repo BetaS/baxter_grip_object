@@ -19,7 +19,6 @@ class Defines:
 from baxter_interface import CHECK_VERSION
 
 import src.core.mathlib as mathlib
-import src.core.robotlib as robotlib
 import src.core.graphiclib as graphiclib
 import src.core.rvizlib as rvizlib
 import src.core.markerlib as markerlib

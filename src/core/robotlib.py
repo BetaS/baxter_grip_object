@@ -7,6 +7,7 @@ import math
 import numpy as np
 import mathlib
 
+
 joint_num = 7
 JOINT_BASE  = 0
 JOINT_MOUNT = 1
@@ -20,27 +21,31 @@ JOINT_W2    = 8
 JOINT_HAND  = 9
 
 joint_translate = np.array([
-        [0.069,     0,          0.27    ], # s0->s1
-        [0.102,     0,          0       ], # s1->e0
-        [0.069,     0,          0.26242 ], # e0->e1
-        [0.104,     0,          0       ], # e1->w0
-        [0.01,      0,          0.271   ], # w0->w1
-        [0.11597,   0,          0       ], # w1->w2
-        [0,         0,          0.11355 ], # w2->hand
-        [0,         0,          0.045   ]  # hand->gripper
-    ], dtype=np.float32)
+    [0.025,     0.219,      0.108   ], # b->mount
+    [0.056,     0,          0.011   ], # mount->s0
+    [0.069,     0,          0.27    ], # s0->s1
+    [0.102,     0,          0       ], # s1->e0
+    [0.069,     0,          0.26242 ], # e0->e1
+    [0.104,     0,          0       ], # e1->w0
+    [0.01,      0,          0.271   ], # w0->w1
+    [0.11597,   0,          0       ], # w1->w2
+    [0,         0,          0.11355 ], # w2->hand
+    [0,         0,          0.045   ]  # hand->gripper
+], dtype=np.float32)
 
 joint_axis = np.array([
-        [0,      0,         0           ], # mount->s0
-        [-1.571, 0,         0           ], # s0->s1
-        [1.571,  1.571,     0           ], # s1->e0
-        [-1.571, 0,         -1.571      ], # e0->e1
-        [1.571,  1.571,     0           ], # e1->w0
-        [-1.571, 0,         -1.571      ], # w0->w1
-        [1.571,  1.571,     0           ], # w1->w2
-        [0,      0,         0           ], # w2->hand
-        [0,      0,         0           ]  # hand->gripper
-    ], dtype=np.float32)
+    [0,      0,         0           ],
+    [-0.002, 0.001,     0.780       ], # b->mount
+    [0,      0,         0           ], # mount->s0
+    [-1.571, 0,         0           ], # s0->s1
+    [1.571,  1.571,     0           ], # s1->e0
+    [-1.571, 0,         -1.571      ], # e0->e1
+    [1.571,  1.571,     0           ], # e1->w0
+    [-1.571, 0,         -1.571      ], # w0->w1
+    [1.571,  1.571,     0           ], # w1->w2
+    [0,      0,         0           ], # w2->hand
+    [0,      0,         0           ]  # hand->gripper
+], dtype=np.float32)
 
 def reflex_joint_angles(angles):
     angles[0] = -angles[0]
@@ -51,20 +56,21 @@ def reflex_joint_angles(angles):
 
 def translate_to_shoulder_frame(pos):
     M = mathlib.translate_matrix2(joint_translate[0])
-    M = np.dot(M, mathlib.translate_matrix2(joint_translate[1]))
     Rm = np.identity(4, dtype=np.float32)
     Rm[0:3, 0:3] = mathlib.eular_to_rotation_matrix2(joint_axis[1])
     M = np.dot(M, Rm)
-    M = np.dot(M, mathlib.translate_matrix2(joint_translate[2]))
+    M = np.dot(M, mathlib.translate_matrix2(joint_translate[1]))
 
     pos = np.dot(np.linalg.inv(M), [pos[0], pos[1], pos[2], 1])
 
     return [pos[0], pos[1], pos[2]]
 
-def GST(theta):
+def GST(arm, theta):
     j = theta
 
     joint_angles = np.array([
+        [0,     0,      0   ], # mount->s0
+        [0,     0,      0   ], # mount->s0
         [0,     0,      j[0]], # mount->s0
         [0,     0,      j[1]], # s0->s1
         [0,     0,      j[2]], # s1->e0
@@ -76,16 +82,23 @@ def GST(theta):
         [0,     0,      0   ]  # hand->gripper
     ], dtype=np.float32)
 
+    _joint_translate = joint_translate.copy()
+    _joint_axis = joint_axis.copy()
+
+    if arm == "right":
+        _joint_translate[0][1] *= -1
+        _joint_axis[1][2] *= -1
+
     # Set Axis
-    joint_angles += joint_axis
+    joint_angles += _joint_axis
 
     start = np.array([0, 0, 0])
     end = start
     pre = np.eye(3)
     ret = []
-    for i in range(7):
+    for i in range(0, 10):
         rm = np.dot(pre, mathlib.eular_to_rotation_matrix(joint_angles[i][0], joint_angles[i][1], joint_angles[i][2]))
-        end = start+np.dot(rm, joint_translate[i])
+        end = start+np.dot(rm, _joint_translate[i])
 
         TF = np.identity(4)
         TF[0:3,0:3] = rm
@@ -107,29 +120,23 @@ def GST(theta):
 def inv_kin(arm, init_joint, pos, ori):
     np.set_printoptions(precision=4,suppress=True)
 
-
     joint_limits = [
-        [-2.3,    0.7],
-        [-2.0,    0.9],
-        [-2.9,    2.9],
-        [0,       2.5],
-        [-2.9,    2.9],
-        [-1.4,    1.9],
-        [-2.9,    2.9]
+        [-0.72,    1.4],
+        [-0.88,    0.6],
+        [-3.14,    3.14],
+        [0,       1.77],
+        [-3.14,    3.14],
+        [-1.56,    2.08],
+        [-3.14,    3.14]
     ]
-
-    init_joint = [0, 0, 0, 0, 0, 0, 0]
-
-    for i in range(7):
-        init_joint[i] = (joint_limits[i][0]+joint_limits[i][1])/2
 
     kin = kdl_kinematics.create_kdl_kin(arm+"_arm_mount", arm+"_wrist", "baxter_urdf.xml")
 
-    N = 10000
+    N = 5000
 
     th1 = np.array(init_joint, dtype=np.float32)
 
-    g = GST(th1)
+    g = GST(arm, th1)
     target = np.identity(4)
     target[0:3,3] = pos
     target[0:3,0:3] = mathlib.eular_to_rotation_matrix(ori[0], ori[1], ori[2])
@@ -137,9 +144,10 @@ def inv_kin(arm, init_joint, pos, ori):
     th = th1
 
     for i in range(N):
-        dist = mathlib.tr2diff(target, g[7])
-        #dist[3] = 0
-        dist[5] = 0
+        dist = mathlib.tr2diff(target, g[10])
+        dist[3] = dist[3]
+        dist[4] = -dist[4]
+        dist[5] = dist[5]
 
         J = kin.jacobian(th)
         J_d = np.linalg.pinv(J)
@@ -149,10 +157,12 @@ def inv_kin(arm, init_joint, pos, ori):
             if math.fabs(dist[j]) > 0.001:
                 end = False
         #for j in range(2):
-        if math.fabs(dist[3]) > 0.2 and math.fabs(dist[3]) < math.pi-0.2:
+        if math.fabs(dist[3]) > math.radians(2) and math.fabs(dist[3]) < math.pi-math.radians(2):
             end = False
-        if math.fabs(dist[4]) > 0.2 and math.fabs(dist[4]) < math.pi-0.2:
+        if math.fabs(dist[4]) > math.radians(2) and math.fabs(dist[4]) < math.pi-math.radians(2):
             end = False
+        #if math.fabs(dist[5]) > math.radians(2) and math.fabs(dist[5]) < math.pi-math.radians(2):
+        #    end = False
 
         if end:
             break
@@ -160,7 +170,7 @@ def inv_kin(arm, init_joint, pos, ori):
         #print i, dist
         #dist[0:3] = mathlib.unit_vector(dist[0:3])
         #di = np.array([0, 0, 0, 0, 0, 0], dtype=np.float32)
-        di = dist*0.01
+        di = dist*0.005
         #di[0:3] = dist[0:3]*0.01
         #di[3:6] = dist[3:6]*0.01
 
@@ -181,6 +191,6 @@ def inv_kin(arm, init_joint, pos, ori):
             elif angle > joint_limits[j][1]:
                 th[j] = joint_limits[j][1]
 
-        g = GST(th)
+        g = GST(arm, th)
 
     return th, dist
