@@ -19,6 +19,10 @@ class Baxter:
         def __init__(self, name):
             self._name = name
             self._limb = baxter_interface.Limb(name)
+            self._gripper = baxter_interface.Gripper(name)
+            self._gripper.set_holding_force(80)
+            self._gripper.open()
+
             self._kin = pykdl.create_kdl_kin(name+"_arm_mount", name+"_wrist")
             self._home_position = list(self.home_position)
 
@@ -112,14 +116,14 @@ class Baxter:
             ret.append({"pos":end, "ori":q})
             return ret
 
-        def get_end_effector_pos(self):
+        def get_end_effector_pose(self):
             pose = self.get_joint_pose(robotlib.JOINT_HAND)
             pos = pose[0]["pos"]
             rot = pose[0]["ori"]
             return [pos[0], pos[1], pos[2]], [rot._x, rot._y, rot._z, rot._w]
 
-        def get_camera_pos(self):
-            pos, rot = self.get_end_effector_pos()
+        def get_camera_pose(self):
+            pos, rot = self.get_end_effector_pose()
             q = mathlib.Quaternion(rot[0], rot[1], rot[2], rot[3])
             pos = pos+q.distance(0.03825, 0.012, 0.015355)
             rot = q*mathlib.Quaternion(0.000, 0.000, -0.707, 0.707)
@@ -137,6 +141,14 @@ class Baxter:
             print "[INVKIN] Failed at "+str(dist)
 
             return False
+
+        def grasp(self):
+            while self._gripper.force() < 25:
+                pos = self._gripper.position()
+                self._gripper.command_position(pos-10)
+
+        def ungrasp(self):
+            self._gripper.open()
 
     class Camera:
         distort_matrix = np.array(
@@ -314,11 +326,17 @@ class Baxter:
     def republish_camera(self, idx, msg):
         self._camera[idx]["image"] = msg
 
-    def get_camera_pos(self, arm):
-        return self._arms[arm].get_camera_pos()
+    def get_range(self, arm):
+        return self._arms[arm].get_range()
+
+    def get_camera_pose(self, arm):
+        return self._arms[arm].get_camera_pose()
 
     def get_all_joint_pose(self, arm):
         return self._arms[arm].get_joint_pose(all_info=True)
+
+    def get_end_effector_pose(self, arm):
+        return self._arms[arm].get_end_effector_pose()
 
     def move_arm(self, arm, pos, ori=[math.pi, 0, 0]):
         return self._arms[arm].move_to_pose(pos, ori)

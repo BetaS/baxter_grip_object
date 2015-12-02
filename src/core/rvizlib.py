@@ -1,6 +1,6 @@
 from geometry_msgs.msg import PolygonStamped, Point32, Pose, Quaternion
 from visualization_msgs.msg import Marker, InteractiveMarkerControl, InteractiveMarker
-import rospy
+import rospy, genpy
 
 def create_shape(holder, ns, id, pt, size=0.1, rot=[0, 0, 0, 1], color=[1, 0, 0]):
     marker = Marker()
@@ -18,6 +18,7 @@ def create_shape(holder, ns, id, pt, size=0.1, rot=[0, 0, 0, 1], color=[1, 0, 0]
     marker.color.r = color[0]
     marker.color.g = color[1]
     marker.color.b = color[2]
+    marker.lifetime = genpy.Duration(0.1)
 
     s = Point32()
     s.x = pt[0]
@@ -47,8 +48,6 @@ def delete_shape(holder, ns, id):
     marker.type = marker.ARROW
     marker.action = marker.DELETE
 
-    holder.markers.append(marker)
-
 def create_axis(holder, ns, id, pos, ori):
     create_arrow(holder, "axis_x_"+ns, id, pos, pos+ori.distance(0.1, 0, 0), color=[1, 0, 0], size=[0.01, 0.02, 0.02])
     create_arrow(holder, "axis_y_"+ns, id, pos, pos+ori.distance(0, 0.1, 0), color=[0, 1, 0], size=[0.01, 0.02, 0.02])
@@ -69,6 +68,7 @@ def create_arrow(holder, ns, id, start, end, color=[1, 0, 0], size=[0.02, 0.05, 
     marker.color.r = color[0]
     marker.color.g = color[1]
     marker.color.b = color[2]
+    marker.lifetime = genpy.Duration(0.1)
 
     s = Point32()
     s.x = start[0]
@@ -99,6 +99,7 @@ def create_arrow2(holder, ns, id, start, rot, dist, color=[1, 0, 0]):
     marker.color.r = color[0]
     marker.color.g = color[1]
     marker.color.b = color[2]
+    marker.lifetime = genpy.Duration(0.1)
 
     end = start+rot.distance(dist[0], dist[1], dist[2])
 

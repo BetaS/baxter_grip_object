@@ -12,6 +12,8 @@ STATUS_DETECT_OBJECT    = 2
 STATUS_MOVE_TO_OBJECT   = 3
 STATUS_ALIGN_TO_OBJECT  = 4
 STATUS_GRASP_OBJECT     = 5
+STATUS_MOVE_TO_RELEASE  = 6
+STATUS_RELEASE_OBJECT   = 7
 
 def nothing(x):
     pass
@@ -29,6 +31,7 @@ class Main:
         self.setup_rviz()
 
         self.object_pos = [0, 0, 0]
+        self.release_pos = [0, 0, 0]
         self.forus_arm = "left"
         self.status = STATUS_INIT
 
@@ -51,9 +54,19 @@ class Main:
         params.minArea = 200.0
         params.maxArea = 5000.0
 
-        detector = cv2.SimpleBlobDetector(params)
+        self.detector = cv2.SimpleBlobDetector(params)
 
-        self.detector = detector
+        params = cv2.SimpleBlobDetector_Params()
+        params.minDistBetweenBlobs = 50.0
+        params.filterByInertia = False
+        params.filterByConvexity = True
+        params.minConvexity = 0.7
+        params.filterByColor = False
+        params.filterByCircularity = False
+        params.filterByArea = True
+        params.minArea = 200.0
+
+        self.detector2 = cv2.SimpleBlobDetector(params)
 
         cv2.namedWindow(self.cv_window["camera"][Defines.LEFT], 1)
         #cv2.namedWindow(self.cv_window["camera"][Defines.RIGHT], 1)
@@ -137,7 +150,7 @@ class Main:
             img = baxter.get_hand_camera_image(arm)
             mat = self.cv_bridge.imgmsg_to_cv2(img)
 
-            pos, rot = baxter.get_camera_pos(arm)
+            pos, rot = baxter.get_camera_pose(arm)
 
             markers = self.detect_marker(mat)
 
@@ -186,7 +199,7 @@ class Main:
                     # print the object when it's available
                     if min != None:
                         tp = min["tp"]
-                        rvizlib.create_interactive_marker(self.marker_server, cnt, tp, 0.05, color, self.click_marker)
+                        rvizlib.create_interactive_marker(self.marker_server, cnt, tp, 0.1, color, self.click_marker)
 
                         # delete object from set
                         del objects[min["idx"]]
@@ -211,7 +224,7 @@ class Main:
             # find the blobs
             keypoints = self.detect_blob(mat)
 
-            pos, rot = baxter.get_camera_pos(arm)
+            pos, rot = baxter.get_camera_pose(arm)
 
             #mat = cv2.drawKeypoints(blob, keypoints, None, (0,0,255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
 
@@ -282,47 +295,101 @@ class Main:
             self.status = STATUS_DETECT_OBJECT
 
     def process_align_to_object(self):
+        print "[STATUS] ALIGN"
+
+        pos, rot = baxter.get_camera_pose(self.focus_arm)
+        e_pos, e_ori = baxter.get_end_effector_pose(self.focus_arm)
+
         # Find object
         img = baxter.get_hand_camera_image(self.focus_arm)
         mat = self.cv_bridge.imgmsg_to_cv2(img)
 
-        self.detect_blob(mat)
-        #
+        # Convert color to HSV
+        hsv = cv2.cvtColor(mat, cv2.COLOR_BGR2HSV)
 
-        pass
+        # Smoothing image (for reduce noises)
+        hsv = cv2.GaussianBlur(hsv, (5, 5), 3)
 
-    def run(self):
-        while self.is_run:
-            self.marker_server.clear()
+        # Eliminate background color and thresholding
+        blob = cv2.inRange(hsv, (0, 37, 20), (255, 165, 118))
 
-            if self.status == STATUS_INIT:
-                self.process_init()
-            elif self.status == STATUS_DETECT_MARKER:
-                self.process_detect_marker()
-            elif self.status == STATUS_DETECT_OBJECT:
-                self.process_detect_object()
-            elif self.status == STATUS_MOVE_TO_OBJECT:
-                self.process_move_to_object()
-            elif self.status == STATUS_ALIGN_TO_OBJECT:
-                self.process_align_to_object()
+        # Detect object informations from thresholding image
+        (cnts, _) = cv2.findContours(blob.copy(), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
-            #cv2.waitKey(1)
-            self.publish_rviz()
+        cnts = sorted(cnts, key = lambda x: cv2.contourArea(x), reverse = True)
+
+        if len(cnts) > 0:
+            moment = cv2.moments(cnts[0])
+            obj_x = moment["m10"]/moment["m00"]
+            obj_y = moment["m01"]/moment["m00"]
+
+            #cv2.circle(mat, (int(obj_x), int(obj_y)), 10, (0, 0, 0))
+            #cv2.imshow(self.cv_window["camera"][self.focus_arm], mat)
+
+            range = baxter.get_range(self.focus_arm)
+            if range < 0.16:
+                print "OK!"
+                self.status = STATUS_GRASP_OBJECT
+                return
+
+            if range > 0:
+                center = baxter.Camera.find_point(pos, rot, 380, 130)
+                object = baxter.Camera.find_point(pos, rot, obj_x, obj_y)
+
+                dist = object-center
+                length = mathlib.dist(center, pos)
+                dist = (dist*range/length)[0:2]
+
+                print range, [obj_x, obj_y], dist
+                if np.linalg.norm(dist) > 0.01:
+                    e_pos[0] += dist[0]/2
+                    e_pos[1] += dist[1]/2
+                    baxter.move_arm(self.focus_arm, e_pos)
+                else:
+                    if range > 0.2:
+                        e_pos[2] -= 0.05
+                    elif range > 0.16:
+                        e_pos[2] -= 0.02
+                    baxter.move_arm(self.focus_arm, e_pos)
+
+    def process_grasp_object(self):
+        # Grip
+        baxter._arms[self.focus_arm].grasp()
+
+        # Move to up
+        baxter.init()
+
+        self.status = STATUS_MOVE_TO_RELEASE
+
+    def process_move_to_release(self):
+        target = self.release_pos
+        target[2] += 0.1
+        baxter.move_arm(self.focus_arm, target)
+        self.status = STATUS_RELEASE_OBJECT
+
+    def process_release_object(self):
+        baxter._arms[self.focus_arm].ungrasp()
+
+        e_pos, e_ori = baxter.get_end_effector_pose(self.focus_arm)
+        e_pos[2] += 0.2
+
+        self.status = STATUS_INIT
 
     def click_marker(self, feedback):
+        if self.status != STATUS_DETECT_MARKER:
+            return
+
         p = feedback.pose.position
         if feedback.event_type == InteractiveMarkerFeedback.BUTTON_CLICK:
             print "[CLICK] " + feedback.marker_name + " at (" + str(p.x) + ", " + str(p.y) + ", " + str(p.z)+")"
-
-            self.object_pos = [p.x, p.y, p.z]
-            if p.y >= 0:
-                self.focus_arm = "left"
-            else:
-                self.focus_arm = "right"
+            self.release_pos = [p.x, p.y, p.z]
 
             self.status = STATUS_DETECT_OBJECT
 
     def click_object(self, feedback):
+        if self.status != STATUS_DETECT_OBJECT:
+            return
+
         p = feedback.pose.position
         if feedback.event_type == InteractiveMarkerFeedback.BUTTON_CLICK:
             print "[CLICK] " + feedback.marker_name + " at (" + str(p.x) + ", " + str(p.y) + ", " + str(p.z)+")"
@@ -334,6 +401,32 @@ class Main:
                 self.focus_arm = "right"
 
             self.status = STATUS_MOVE_TO_OBJECT
+
+    def run(self):
+        while self.is_run:
+            self.markers.markers = list()
+            self.marker_server.clear()
+
+            if self.status == STATUS_INIT:
+                self.process_init()
+            elif self.status == STATUS_DETECT_MARKER:
+                self.process_detect_marker()
+            elif self.status == STATUS_DETECT_OBJECT:
+                self.process_detect_object()
+            elif self.status == STATUS_MOVE_TO_OBJECT:
+                self.publish_rviz()
+                self.process_move_to_object()
+            elif self.status == STATUS_ALIGN_TO_OBJECT:
+                self.process_align_to_object()
+            elif self.status == STATUS_GRASP_OBJECT:
+                self.process_grasp_object()
+            elif self.status == STATUS_MOVE_TO_RELEASE:
+                self.process_move_to_release()
+            elif self.status == STATUS_RELEASE_OBJECT:
+                self.process_release_object()
+
+            #cv2.waitKey(1)
+            self.publish_rviz()
 
 if __name__ == '__main__':
     main = Main(False)
