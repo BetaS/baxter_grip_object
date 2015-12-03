@@ -150,4 +150,4 @@ def create_interactive_marker(holder, id, pos, size, color, func):
 
     # add the control to the interactive marker
     int_marker.controls.append( box_control )
-    holder.insert(int_marker, func)
+    holder.insert(int_marker, lambda x: func(x, color))

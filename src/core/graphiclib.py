@@ -59,7 +59,8 @@ def color_distance(color1, color2):
     dl = color1[0]-color2[0]
     da = color1[1]-color2[1]
     db = color1[2]-color2[2]
-    dh = math.sqrt((da*da)+(db*db)-(dc*dc))
+
+    dh = math.sqrt(math.fabs((da*da)+(db*db)-(dc*dc)))
     first = dl
     second = dc/(1+0.045*c1)
     third = dh/(1+0.015*c1)

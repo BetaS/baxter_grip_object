@@ -20,11 +20,13 @@ class Baxter:
             self._name = name
             self._limb = baxter_interface.Limb(name)
             self._gripper = baxter_interface.Gripper(name)
+            self._gripper.set_moving_force(80)
             self._gripper.set_holding_force(80)
             self._gripper.open()
 
             self._kin = pykdl.create_kdl_kin(name+"_arm_mount", name+"_wrist")
             self._home_position = list(self.home_position)
+            self._target_position = []
 
             self.joint_translate = robotlib.joint_translate.copy()
             self.joint_axis = robotlib.joint_axis.copy()
@@ -52,11 +54,26 @@ class Baxter:
         def home(self):
             self.set_joint_angle(self._home_position)
 
+        def set_target(self, pos, ori):
+            joints = self.get_joint_angle()
+            th, dist = robotlib.inv_kin(self._name, joints, pos, ori)
+            err = np.linalg.norm(dist[0:3])
+            if err < 0.01:
+                self._target_position = th
+                return True
+            else:
+                print "[INVKIN] Failed at "+str(dist)
+                return False
+
+
+        def target(self):
+            self.set_joint_angle(self._target_position)
+
         def get_joint_angle(self):
             angles = self._limb.joint_angles()
             return np.array([angles[self._name+"_s0"], angles[self._name+"_s1"], angles[self._name+"_e0"], angles[self._name+"_e1"], angles[self._name+"_w0"], angles[self._name+"_w1"], angles[self._name+"_w2"]], dtype=np.float32)
 
-        def set_joint_angle(self, target=[], time=5000):
+        def set_joint_angle(self, target=[], time=3000):
             time /= 1000.0
 
             pos = {}
@@ -132,9 +149,11 @@ class Baxter:
 
         def move_to_pose(self, pos, ori):
             joints = self.get_joint_angle()
-            th, dist = robotlib.inv_kin(self._name, joints, pos, ori)
+            th, dist = robotlib.inv_kin(self._name, joints, pos, [ori[0], ori[1], 0])
             err = np.linalg.norm(dist[0:3])
             if err < 0.01:
+                print ori[2]
+                th[6] += ori[2]
                 self.set_joint_angle(th)
                 return True
 
@@ -143,9 +162,10 @@ class Baxter:
             return False
 
         def grasp(self):
-            while self._gripper.force() < 25:
+            while self._gripper.force() < 80 and self._gripper.position() > 10:
                 pos = self._gripper.position()
                 self._gripper.command_position(pos-10)
+            print self._gripper.force()
 
         def ungrasp(self):
             self._gripper.open()
@@ -252,6 +272,12 @@ class Baxter:
         print("Enabling robot... ")
         self._rs.enable()
 
+        print("Initializing robot...")
+        self._display = rospy.Publisher('/robot/xdisplay', Image, queue_size=10)
+        self._arms = {}
+        self._arms[Defines.LEFT] = Baxter.Arm("left")
+        self._arms[Defines.RIGHT] = Baxter.Arm("right")
+
         print("Initializing camera...")
         camera_mapper = ["left_hand_camera", "right_hand_camera"]
         self._camera = {}
@@ -262,6 +288,8 @@ class Baxter:
             self._camera[idx] = {}
 
             if first:
+                self._arms[idx]._gripper.calibrate()
+
                 camera = baxter_interface.CameraController(camera_name)
                 camera.resolution = (640, 400)
                 camera.fps = 30
@@ -279,13 +307,6 @@ class Baxter:
 
             sub = rospy.Subscriber("/cameras/"+camera_name+"/image", Image, republish, None, 1)
             self._camera[idx] = {"name": camera_name, "camera": camera, "sub": sub, "image": None}
-
-
-        print("Initializing robot...")
-        self._display = rospy.Publisher('/robot/xdisplay', Image, queue_size=10)
-        self._arms = {}
-        self._arms[Defines.LEFT] = Baxter.Arm("left")
-        self._arms[Defines.RIGHT] = Baxter.Arm("right")
 
         self.init()
 
@@ -311,6 +332,8 @@ class Baxter:
 
     def init(self):
         self.head_angle(0)
+
+    def home(self):
         self._arms[Defines.LEFT].home()
         self._arms[Defines.RIGHT].home()
 
@@ -340,6 +363,21 @@ class Baxter:
 
     def move_arm(self, arm, pos, ori=[math.pi, 0, 0]):
         return self._arms[arm].move_to_pose(pos, ori)
+
+    def set_target(self, pos, ori=[math.pi, 0, 0]):
+        for arm in self._arms:
+            if not self._arms[arm].set_target(pos, ori):
+                return False
+
+        return True
+
+    def target(self, arm):
+        self._arms[arm].target()
+
+    def calibration(self):
+        for arm in self._arms:
+            self._arms[arm]._gripper.calibrate()
+
 
     def display(self, img):
         self._display.publish(img)

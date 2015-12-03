@@ -121,7 +121,7 @@ def inv_kin(arm, init_joint, pos, ori):
     np.set_printoptions(precision=4,suppress=True)
 
     joint_limits = [
-        [-0.72,    1.4],
+        [-0.8,    1.4],
         [-0.88,    0.6],
         [-3.14,    3.14],
         [0,       1.77],
@@ -132,7 +132,7 @@ def inv_kin(arm, init_joint, pos, ori):
 
     kin = kdl_kinematics.create_kdl_kin(arm+"_arm_mount", arm+"_wrist", "baxter_urdf.xml")
 
-    N = 5000
+    N = 3000
 
     th1 = np.array(init_joint, dtype=np.float32)
 
@@ -142,6 +142,7 @@ def inv_kin(arm, init_joint, pos, ori):
     target[0:3,0:3] = mathlib.eular_to_rotation_matrix(ori[0], ori[1], ori[2])
 
     th = th1
+    th = th.tolist()
 
     for i in range(N):
         dist = mathlib.tr2diff(target, g[10])
@@ -161,16 +162,17 @@ def inv_kin(arm, init_joint, pos, ori):
             end = False
         if math.fabs(dist[4]) > math.radians(2) and math.fabs(dist[4]) < math.pi-math.radians(2):
             end = False
-        #if math.fabs(dist[5]) > math.radians(2) and math.fabs(dist[5]) < math.pi-math.radians(2):
-        #    end = False
+        if math.fabs(dist[5]) > math.radians(5) and math.fabs(dist[5]) < math.pi-math.radians(5):
+            end = False
 
         if end:
             break
 
         #print i, dist
         #dist[0:3] = mathlib.unit_vector(dist[0:3])
-        #di = np.array([0, 0, 0, 0, 0, 0], dtype=np.float32)
-        di = dist*0.005
+        di = np.array([0, 0, 0, 0, 0, 0], dtype=np.float32)
+        di[0:3] = np.array(dist[0:3])*0.1
+        di[3:6] = np.array(dist[3:6])*0.01
         #di[0:3] = dist[0:3]*0.01
         #di[3:6] = dist[3:6]*0.01
 
@@ -193,4 +195,5 @@ def inv_kin(arm, init_joint, pos, ori):
 
         g = GST(arm, th)
 
+    print "[INVKIN] FIND SOLUTION at "+str(i)+", "+str(dist)
     return th, dist

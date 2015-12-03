@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import time
+import time, math
 from src.importer import *
 from interactive_markers.interactive_marker_server import *
 from geometry_msgs.msg import PolygonStamped
@@ -31,7 +31,9 @@ class Main:
         self.setup_rviz()
 
         self.object_pos = [0, 0, 0]
+        self.object_color = [0, 0, 0]
         self.release_pos = [0, 0, 0]
+        self.target_ori = None
         self.forus_arm = "left"
         self.status = STATUS_INIT
 
@@ -136,7 +138,7 @@ class Main:
             cv2.fillConvexPoly(mat, np.array(m["bound"], np.int32), c)
 
     def process_init(self):
-        baxter.init()
+        baxter.home()
         self.status = STATUS_DETECT_MARKER
 
     def process_detect_marker(self):
@@ -286,16 +288,24 @@ class Main:
 
     def process_move_to_object(self):
         pos = self.object_pos
-        pos[2] = pos[2] + 0.1
+        pos[2] = pos[2] + 0.05
 
         if baxter.move_arm(self.focus_arm, pos):
             self.status = STATUS_ALIGN_TO_OBJECT
+            self.target_ori = None
         else:
-            baxter.init()
+            baxter.home()
             self.status = STATUS_DETECT_OBJECT
 
     def process_align_to_object(self):
         print "[STATUS] ALIGN"
+
+        if self.focus_arm == "right":
+            center_x = 360
+            center_y = 130
+        else:
+            center_x = 380
+            center_y = 130
 
         pos, rot = baxter.get_camera_pose(self.focus_arm)
         e_pos, e_ori = baxter.get_end_effector_pose(self.focus_arm)
@@ -303,6 +313,10 @@ class Main:
         # Find object
         img = baxter.get_hand_camera_image(self.focus_arm)
         mat = self.cv_bridge.imgmsg_to_cv2(img)
+
+        # remove markers
+        markers = self.detect_marker(mat)
+        self.print_marker(mat, markers, [0, 0, 0])
 
         # Convert color to HSV
         hsv = cv2.cvtColor(mat, cv2.COLOR_BGR2HSV)
@@ -312,28 +326,67 @@ class Main:
 
         # Eliminate background color and thresholding
         blob = cv2.inRange(hsv, (0, 37, 20), (255, 165, 118))
+        self.print_marker(blob, markers, [0])
+
+        # Eliminate gripper
+        if self.focus_arm == Defines.LEFT:
+            cv2.fillConvexPoly(blob, np.array([(300, 0), (290, 130), (240, 80), (180, 0)], dtype=np.int32), 0)
+            cv2.fillConvexPoly(blob, np.array([(500, 0), (495, 130), (600, 90), (600, 40), (640, 5), (640, 0)], dtype=np.int32), 0)
+        else:
+            cv2.fillConvexPoly(blob, np.array([(220, 0), (220, 130), (140, 80), (80, 0)], dtype=np.int32), 0)
+            cv2.fillConvexPoly(blob, np.array([(490, 0), (500, 130), (620, 85), (630, 20), (640, 10), (640, 0)], dtype=np.int32), 0)
 
         # Detect object informations from thresholding image
         (cnts, _) = cv2.findContours(blob.copy(), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        cnts = sorted(cnts, key = lambda x: cv2.arcLength(x, True), reverse = True)
+        if len(cnts) > 5:
+            cnts = cnts[0:5]
 
-        cnts = sorted(cnts, key = lambda x: cv2.contourArea(x), reverse = True)
+        cnt_info = []
+        for cnt in cnts:
+            moment = cv2.moments(cnt)
+            if moment["m00"] == 0:
+                continue
 
-        if len(cnts) > 0:
-            moment = cv2.moments(cnts[0])
             obj_x = moment["m10"]/moment["m00"]
             obj_y = moment["m01"]/moment["m00"]
+            color = cv2.mean(mat[obj_y-5:obj_y+5, obj_x-5:obj_x+5])
+            size = cv2.contourArea(cnt)
+
+            cnt_info.append({
+                "contour": cnt,
+                "pos": [obj_x, obj_y],
+                "dist": mathlib.dist([center_x, center_y], [obj_x, obj_y]),
+                "color": [color[2]/255, color[1]/255, color[0]/255],
+                "size": size
+            })
+
+        target = None
+        c_min = -1
+        for cnt in cnt_info:
+            if cnt["size"] > 10000:
+                if target == None or c_min > cnt["dist"]:
+                    target = cnt
+                    c_min = cnt["dist"]
+
+        #cv2.imshow("test", mat)
+        #cv2.waitKey(1)
+
+        if target != None:
+            obj_x = target["pos"][0]
+            obj_y = target["pos"][1]
 
             #cv2.circle(mat, (int(obj_x), int(obj_y)), 10, (0, 0, 0))
             #cv2.imshow(self.cv_window["camera"][self.focus_arm], mat)
 
             range = baxter.get_range(self.focus_arm)
-            if range < 0.16:
+            if range < 0.11:
                 print "OK!"
                 self.status = STATUS_GRASP_OBJECT
                 return
 
             if range > 0:
-                center = baxter.Camera.find_point(pos, rot, 380, 130)
+                center = baxter.Camera.find_point(pos, rot, center_x, center_y)
                 object = baxter.Camera.find_point(pos, rot, obj_x, obj_y)
 
                 dist = object-center
@@ -342,40 +395,67 @@ class Main:
 
                 print range, [obj_x, obj_y], dist
                 if np.linalg.norm(dist) > 0.01:
-                    e_pos[0] += dist[0]/2
-                    e_pos[1] += dist[1]/2
-                    baxter.move_arm(self.focus_arm, e_pos)
+                    e_pos[0] += dist[0]
+                    e_pos[1] += dist[1]
+                    if self.target_ori == None:
+                        baxter.move_arm(self.focus_arm, e_pos)
+                    else:
+                        baxter.move_arm(self.focus_arm, e_pos, self.target_ori)
                 else:
-                    if range > 0.2:
-                        e_pos[2] -= 0.05
-                    elif range > 0.16:
-                        e_pos[2] -= 0.02
-                    baxter.move_arm(self.focus_arm, e_pos)
+                    if self.target_ori == None:
+                        rect = cv2.minAreaRect(target["contour"])
+                        print rect
+
+                        if rect[1][0] > 0 and rect[1][0] > 0:
+                            ratio = min(rect[1][1]/rect[1][0], rect[1][0]/rect[1][1])
+                            if ratio > 0.75:
+                                # don't care orientation
+                                self.target_ori = [math.pi, 0, 0]
+                            else:
+                                # Rotate to desire angle
+                                if rect[1][0] < rect[1][1]:
+                                    angle = math.radians(-90+rect[2])
+                                else:
+                                    angle = math.radians(90+rect[2])
+
+                                self.target_ori = [math.pi, 0, angle]
+                                baxter.move_arm(self.focus_arm, e_pos, self.target_ori)
+                    else:
+                        if range > 0.2:
+                            e_pos[2] -= 0.05
+                        elif range > 0.11:
+                            e_pos[2] -= 0.02
+                        baxter.move_arm(self.focus_arm, e_pos, self.target_ori)
 
     def process_grasp_object(self):
         # Grip
         baxter._arms[self.focus_arm].grasp()
 
         # Move to up
-        baxter.init()
+        baxter.home()
 
         self.status = STATUS_MOVE_TO_RELEASE
 
     def process_move_to_release(self):
-        target = self.release_pos
-        target[2] += 0.1
-        baxter.move_arm(self.focus_arm, target)
+        baxter.target(self.focus_arm)
         self.status = STATUS_RELEASE_OBJECT
 
     def process_release_object(self):
         baxter._arms[self.focus_arm].ungrasp()
 
-        e_pos, e_ori = baxter.get_end_effector_pose(self.focus_arm)
-        e_pos[2] += 0.2
+        time.sleep(1)
 
-        self.status = STATUS_INIT
+        # reset
+        self.focus_arm = None
+        self.object_pos = [0, 0, 0]
+        self.object_color = [0, 0, 0]
+        self.target_ori = None
 
-    def click_marker(self, feedback):
+        baxter.home()
+
+        self.status = STATUS_DETECT_OBJECT
+
+    def click_marker(self, feedback, color):
         if self.status != STATUS_DETECT_MARKER:
             return
 
@@ -383,10 +463,14 @@ class Main:
         if feedback.event_type == InteractiveMarkerFeedback.BUTTON_CLICK:
             print "[CLICK] " + feedback.marker_name + " at (" + str(p.x) + ", " + str(p.y) + ", " + str(p.z)+")"
             self.release_pos = [p.x, p.y, p.z]
+            target = self.release_pos
+            target[2] += 0.05
 
-            self.status = STATUS_DETECT_OBJECT
+            self.status = -1
+            if baxter.set_target(target):
+                self.status = STATUS_DETECT_OBJECT
 
-    def click_object(self, feedback):
+    def click_object(self, feedback, color):
         if self.status != STATUS_DETECT_OBJECT:
             return
 
@@ -395,6 +479,7 @@ class Main:
             print "[CLICK] " + feedback.marker_name + " at (" + str(p.x) + ", " + str(p.y) + ", " + str(p.z)+")"
 
             self.object_pos = [p.x, p.y, p.z]
+            self.object_color = color
             if p.y >= 0:
                 self.focus_arm = "left"
             else:
@@ -430,4 +515,7 @@ class Main:
 
 if __name__ == '__main__':
     main = Main(False)
+    #baxter.calibration()
+    main.focus_arm = "right"
+    main.status = 10
     main.run()
