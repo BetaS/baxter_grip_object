@@ -261,7 +261,7 @@ class Main:
                         p, dist = mathlib.line_intersect_skewed(o[0], o[1], pos, point)
 
                         # Find nearest object in opposite image.
-                        if dist < 0.05:
+                        if dist < 0.02:
                             intersect_object[k] = [o, p]
 
                     min = None
