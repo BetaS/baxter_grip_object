@@ -18,7 +18,7 @@ def create_shape(holder, ns, id, pt, size=0.1, rot=[0, 0, 0, 1], color=[1, 0, 0]
     marker.color.r = color[0]
     marker.color.g = color[1]
     marker.color.b = color[2]
-    marker.lifetime = genpy.Duration(0.1)
+    marker.lifetime = genpy.Duration(1)
 
     s = Point32()
     s.x = pt[0]
@@ -68,7 +68,7 @@ def create_arrow(holder, ns, id, start, end, color=[1, 0, 0], size=[0.02, 0.05, 
     marker.color.r = color[0]
     marker.color.g = color[1]
     marker.color.b = color[2]
-    marker.lifetime = genpy.Duration(0.1)
+    marker.lifetime = genpy.Duration(1)
 
     s = Point32()
     s.x = start[0]
@@ -99,7 +99,7 @@ def create_arrow2(holder, ns, id, start, rot, dist, color=[1, 0, 0]):
     marker.color.r = color[0]
     marker.color.g = color[1]
     marker.color.b = color[2]
-    marker.lifetime = genpy.Duration(0.1)
+    marker.lifetime = genpy.Duration(1)
 
     end = start+rot.distance(dist[0], dist[1], dist[2])
 

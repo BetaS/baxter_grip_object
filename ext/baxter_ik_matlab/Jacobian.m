@@ -4,12 +4,12 @@ Gst = gst(w, q, theta);
 q(end,:) = [];
 [~,n] = size(w);
 
-q_diff = [Gst(1:3,4,7)-Gst(1:3,4,1), Gst(1:3,4,7)-Gst(1:3,4,2), Gst(1:3,4,7)-Gst(1:3,4,3), Gst(1:3,4,7)-Gst(1:3,4,4), Gst(1:3,4,7)-Gst(1:3,4,5), Gst(1:3,4,7)-Gst(1:3,4,6), Gst(1:3,4,7)-Gst(1:3,4,7)];
+% q_diff = [Gst(1:3,4,7)-Gst(1:3,4,1), Gst(1:3,4,7)-Gst(1:3,4,2), Gst(1:3,4,7)-Gst(1:3,4,3), Gst(1:3,4,7)-Gst(1:3,4,4), Gst(1:3,4,7)-Gst(1:3,4,5), Gst(1:3,4,7)-Gst(1:3,4,6), Gst(1:3,4,7)-Gst(1:3,4,7)];
 
 
 % xi
 for i = 1:n
-    xi{i} = [cross(w(:,i),q_diff(1:3,i)); w(:,i)];%[-cross(w(:,i),q(:,i)); w(:,i)];
+    xi{i} = [cross(w(:,i),q(1:3,i)); w(:,i)];%[-cross(w(:,i),q(:,i)); w(:,i)];
 end
 
 % xih
@@ -28,7 +28,7 @@ Jst = [];
 for i = 1:n
     G = Gst(:,:,i);
     R = G(1:3,1:3);
-    P = q_diff(:,i);
+    P = G(1:3,4);
     Adg = [R                hat(P)*R; 
                 zeros(3,3)  R];
     Jst(:,i) = Adg*xi{i};

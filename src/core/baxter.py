@@ -32,6 +32,7 @@ class Baxter:
             self.joint_axis = robotlib.joint_axis.copy()
 
             self._range = -1
+            self._range_field = -1
             self._range_sub = rospy.Subscriber("/robot/range/"+name+"_hand_range/state", Range, self._range_republish, None, 1)
 
             if name == "right":
@@ -45,8 +46,10 @@ class Baxter:
         def _range_republish(self, msg):
             if msg.range >= msg.max_range or msg.range <= msg.min_range:
                 self._range = -1
+                self._range_field = -1
             else:
                 self._range = msg.range
+                self._range_field = msg.field_of_view
 
         def get_range(self):
             return self._range
@@ -73,7 +76,7 @@ class Baxter:
             angles = self._limb.joint_angles()
             return np.array([angles[self._name+"_s0"], angles[self._name+"_s1"], angles[self._name+"_e0"], angles[self._name+"_e1"], angles[self._name+"_w0"], angles[self._name+"_w1"], angles[self._name+"_w2"]], dtype=np.float32)
 
-        def set_joint_angle(self, target=[], time=3000):
+        def set_joint_angle(self, target=[], time=5000):
             time /= 1000.0
 
             pos = {}

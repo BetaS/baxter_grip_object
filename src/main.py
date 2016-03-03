@@ -53,7 +53,7 @@ class Main:
         params.filterByColor = False
         params.filterByCircularity = False
         params.filterByArea = True
-        params.minArea = 200.0
+        params.minArea = 150.0
         params.maxArea = 5000.0
 
         self.detector = cv2.SimpleBlobDetector(params)
@@ -261,7 +261,7 @@ class Main:
                         p, dist = mathlib.line_intersect_skewed(o[0], o[1], pos, point)
 
                         # Find nearest object in opposite image.
-                        if dist < 0.05:
+                        if dist < 0.03:
                             intersect_object[k] = [o, p]
 
                     min = None
@@ -277,7 +277,7 @@ class Main:
                     if min != None:
                         tp = min["tp"]
 
-                        rvizlib.create_interactive_marker(self.marker_server, cnt, tp, 0.05, color, self.click_object)
+                        rvizlib.create_interactive_marker(self.marker_server, cnt, tp, 0.1, color, self.click_object)
 
                         # delete object from set
                         del objects[min["idx"]]
@@ -294,18 +294,27 @@ class Main:
             self.status = STATUS_ALIGN_TO_OBJECT
             self.target_ori = None
         else:
-            baxter.home()
-            self.status = STATUS_DETECT_OBJECT
+            if self.focus_arm == Defines.LEFT:
+                self.focus_arm = Defines.RIGHT
+            else:
+                self.focus_arm = Defines.LEFT
+
+            if baxter.move_arm(self.focus_arm, pos):
+                self.status = STATUS_ALIGN_TO_OBJECT
+                self.target_ori = None
+            else:
+                baxter.home()
+                self.status = STATUS_DETECT_OBJECT
 
     def process_align_to_object(self):
         print "[STATUS] ALIGN"
 
         if self.focus_arm == "right":
             center_x = 360
-            center_y = 130
+            center_y = 140
         else:
             center_x = 380
-            center_y = 130
+            center_y = 140
 
         pos, rot = baxter.get_camera_pose(self.focus_arm)
         e_pos, e_ori = baxter.get_end_effector_pose(self.focus_arm)
@@ -364,10 +373,10 @@ class Main:
         target = None
         c_min = -1
         for cnt in cnt_info:
-            if cnt["size"] > 10000:
-                if target == None or c_min > cnt["dist"]:
-                    target = cnt
-                    c_min = cnt["dist"]
+            #if cnt["size"] > 10000:
+            if target == None or c_min > cnt["dist"]:
+                target = cnt
+                c_min = cnt["dist"]
 
         #cv2.imshow("test", mat)
         #cv2.waitKey(1)
@@ -380,7 +389,15 @@ class Main:
             #cv2.imshow(self.cv_window["camera"][self.focus_arm], mat)
 
             range = baxter.get_range(self.focus_arm)
-            if range < 0.11:
+            if range == -1:
+                baxter.home()
+                self.focus_arm = None
+                self.target_ori = None
+                self.status = STATUS_DETECT_OBJECT
+
+                return
+
+            if range > 0 and range <= 0.105:
                 print "OK!"
                 self.status = STATUS_GRASP_OBJECT
                 return
@@ -421,10 +438,10 @@ class Main:
                                 self.target_ori = [math.pi, 0, angle]
                                 baxter.move_arm(self.focus_arm, e_pos, self.target_ori)
                     else:
-                        if range > 0.2:
-                            e_pos[2] -= 0.05
-                        elif range > 0.11:
-                            e_pos[2] -= 0.02
+                        if range > 0.22:
+                            e_pos[2] -= 0.1
+                        else:
+                            e_pos[2] -= 0.03
                         baxter.move_arm(self.focus_arm, e_pos, self.target_ori)
 
     def process_grasp_object(self):
@@ -469,6 +486,8 @@ class Main:
             self.status = -1
             if baxter.set_target(target):
                 self.status = STATUS_DETECT_OBJECT
+            else:
+                self.status = STATUS_DETECT_MARKER
 
     def click_object(self, feedback, color):
         if self.status != STATUS_DETECT_OBJECT:
@@ -515,7 +534,6 @@ class Main:
 
 if __name__ == '__main__':
     main = Main(False)
-    #baxter.calibration()
-    main.focus_arm = "right"
-    main.status = 10
+    #print baxter._arms["left"].get_joint_angle()
+    baxter.calibration()
     main.run()

@@ -50,7 +50,7 @@ gst_init = gst(W,Q,th1);
 th2 = [ pi/4 0 0 0 0 0 pi/4]';
 gst_target = gst(W,Q,th2);
 
-J = Jacobian(W, Q, th2)
+J = Jacobian_Origin(W, Q, th2)
     
 %dist(4:6) = [0 0 0]
 %{
@@ -99,7 +99,7 @@ x2 = [en(1:3,4,7); Euler_From_Matrix(en(1:3,1:3,7))']
 %}
 %{/
 N = 1000;
-dt = 1/100;%100/N;%1/100;
+dt = 1/30;%100/N;%1/100;
 th(:,1) = th1;
 g = [];
 g(:,:,:,1) = gst(W, Q, th(:,1));
@@ -111,10 +111,10 @@ for i=1:N
     dist(4:6,i) = [0 0 0]';
     n_dist(:, i) = norm(dist(:, i));
     
-    J = Jacobian(W, Q, th(:,i));
+    J = Jacobian_Origin(W, Q, th(:,i));
     J_d = pinv(J);
     
-    if n_dist < 1e-2
+    if n_dist(:, i) < 0.05
         break
     end
 
@@ -123,19 +123,19 @@ for i=1:N
     theta_dot = J_d*di;
     th(:,i+1) = th(:,i)+(theta_dot);
     
-    %{/
+    %{
     for j=1:7
         angle = th(j,i+1);
         th(j,i+1) = atan2(sin(angle), cos(angle));
     end
-    %}/
+    %}
     %joint limits
     %{
     for j = 1:7
         if th(j,i+1) < joint_limits(j, 1)
-            th(j,i+1) = 0;%joint_limits(j, 1);
+            th(j,i+1) = joint_limits(j, 1);
         elseif th(j,i+1) > joint_limits(j, 2)
-            th(j,i+1) = 0;%joint_limits(j, 2);
+            th(j,i+1) = joint_limits(j, 2);
         end
     end
     %}
@@ -186,6 +186,9 @@ for k = 1:length(th)
     % Print planned joint angles
     draw_gst(g(:,:,:,k), 3, 'r');
     %draw_gst(gst_target, 2, 'b');
+    
+    draw_end_point(g(:,:,7,1), 2);
+    draw_end_point(g(:,:,7,length(th)), 2);
     
     % Draw Velocity
     v = dist(:, k);
